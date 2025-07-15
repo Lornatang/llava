@@ -23,10 +23,10 @@ import torch
 import torch.utils.data
 import transformers
 from PIL import Image
-from llava.model import *
 from llava.train.llava_trainer import LLaVATrainer
 
 from llava.models import IGNORE_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
+from llava.models.llm.llama import LlavaLlamaForCausalLM
 from llava.utils.conversation import SeparatorStyle, conv_templates, default_conversation
 from llava.utils.ops import tokenizer_image_token
 
