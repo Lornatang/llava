@@ -16,8 +16,7 @@ from typing import List, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 
-from transformers import AutoConfig, AutoModelForCausalLM, \
-                         LlamaConfig, LlamaModel, LlamaForCausalLM
+from transformers import AutoConfig, AutoModelForCausalLM, LlamaConfig, LlamaModel, LlamaForCausalLM
 
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.generation.utils import GenerateOutput
@@ -32,12 +31,12 @@ class LlavaLlamaModel(LlavaMetaModel, LlamaModel):
     config_class = LlavaConfig
 
     def __init__(self, config: LlamaConfig):
-        super(LlavaLlamaModel, self).__init__(config)
+        super().__init__(config)
 class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
     config_class = LlavaConfig
 
     def __init__(self, config):
-        super(LlamaForCausalLM, self).__init__(config)
+        super().__init__(config)
         self.model = LlavaLlamaModel(config)
         self.pretraining_tp = config.pretraining_tp
         self.vocab_size = config.vocab_size

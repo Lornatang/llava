@@ -12,6 +12,7 @@
 # limitations under the License.
 # ==============================================================================
 from abc import ABC, abstractmethod
+from typing import Any, List, Optional, Tuple, Union
 
 import torch
 from torch import nn
@@ -23,8 +24,13 @@ from .multimodal_projector.builder import build_vision_projector
 
 
 class LlavaMetaModel:
-    def __init__(self, config):
-        super(LlavaMetaModel, self).__init__(config)
+    def __init__(self, config: Any) -> None:
+        """Initialize LlavaMetaModel.
+
+        Args:
+            config (Any): Model configuration object.
+        """
+        super().__init__(config)
 
         self.config = None
         if hasattr(config, "mm_vision_tower"):
@@ -34,13 +40,24 @@ class LlavaMetaModel:
             if "unpad" in getattr(config, "mm_patch_merge_type", ""):
                 self.image_newline = nn.Parameter(torch.empty(config.hidden_size, dtype=self.dtype))
 
-    def get_vision_tower(self):
+    def get_vision_tower(self) -> Any:
+        """Get the vision tower module.
+
+        Returns:
+            Any: The vision tower module.
+        """
         vision_tower = getattr(self, "vision_tower", None)
         if type(vision_tower) is list:
             vision_tower = vision_tower[0]
         return vision_tower
 
-    def initialize_vision_modules(self, model_args, fsdp=None):
+    def initialize_vision_modules(self, model_args: Any, fsdp: Optional[List[Any]] = None) -> None:
+        """Initialize vision modules and projector.
+
+        Args:
+            model_args (Any): Model arguments containing vision and projector settings.
+            fsdp (Optional[List[Any]]): FSDP wrapper list, if any.
+        """
         vision_tower = model_args.vision_tower
         mm_vision_select_layer = model_args.mm_vision_select_layer
         mm_vision_select_feature = model_args.mm_vision_select_feature
@@ -61,6 +78,7 @@ class LlavaMetaModel:
                 vision_tower = self.vision_tower[0]
             else:
                 vision_tower = self.vision_tower
+
             vision_tower.load_model()
 
         self.config.use_mm_proj = True
@@ -90,9 +108,18 @@ class LlavaMetaModel:
             self.mm_projector.load_state_dict(get_w(mm_projector_weights, "mm_projector"))
 
 
-def unpad_image(tensor, original_size):
+def unpad_image(x: torch.Tensor, original_size: Tuple[int, int]) -> torch.Tensor:
+    """Remove padding from an image tensor to restore its original size.
+
+    Args:
+        x (torch.Tensor): The padded image tensor.
+        original_size (Tuple[int, int]): The original width and height.
+
+    Returns:
+        torch.Tensor: The unpadded image tensor.
+    """
     original_width, original_height = original_size
-    current_height, current_width = tensor.shape[1:]
+    current_height, current_width = x.shape[1:]
 
     original_aspect_ratio = original_width / original_height
     current_aspect_ratio = current_width / current_height
@@ -101,39 +128,84 @@ def unpad_image(tensor, original_size):
         scale_factor = current_width / original_width
         new_height = int(original_height * scale_factor)
         padding = (current_height - new_height) // 2
-        unpadded_tensor = tensor[:, padding:current_height - padding, :]
+        unpadded_tensor = x[:, padding:current_height - padding, :]
     else:
         scale_factor = current_height / original_height
         new_width = int(original_width * scale_factor)
         padding = (current_width - new_width) // 2
-        unpadded_tensor = tensor[:, :, padding:current_width - padding]
+        unpadded_tensor = x[:, :, padding:current_width - padding]
 
     return unpadded_tensor
 
 
 class LlavaMetaForCausalLM(ABC):
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """Initialize LlavaMetaForCausalLM."""
         self.config = None
         self.model = None
 
     @abstractmethod
-    def get_model(self):
+    def get_model(self) -> Any:
+        """Get the underlying model.
+
+        Returns:
+            Any: The underlying model.
+        """
         pass
 
-    def get_vision_tower(self):
+    def get_vision_tower(self) -> Any:
+        """Get the vision tower from the underlying model.
+
+        Returns:
+            Any: The vision tower module.
+        """
         return self.get_model().get_vision_tower()
 
-    def encode_images(self, images):
+    def encode_images(self, images: torch.Tensor) -> torch.Tensor:
+        """Encode images using the vision tower and projector.
+
+        Args:
+            images (torch.Tensor): Input images tensor.
+
+        Returns:
+            torch.Tensor: Encoded image features.
+        """
         image_features = self.get_model().get_vision_tower()(images)
         image_features = self.get_model().mm_projector(image_features)
         return image_features
 
     def prepare_inputs_labels_for_multimodal(
-            self, input_ids, position_ids, attention_mask, past_key_values, labels,
-            images,
-            image_sizes=None,
-    ):
+            self,
+            input_ids: torch.Tensor,
+            position_ids: Optional[torch.Tensor],
+            attention_mask: Optional[torch.Tensor],
+            past_key_values: Any,
+            labels: Optional[torch.Tensor],
+            images: Optional[Union[torch.Tensor, List[torch.Tensor]]],
+            image_sizes: Optional[List[Tuple[int, int]]] = None,
+    ) -> Tuple[
+        Optional[None],
+        Optional[torch.Tensor],
+        Optional[torch.Tensor],
+        Any,
+        Optional[torch.Tensor],
+        Optional[torch.Tensor]
+    ]:
+        """Prepare inputs and labels for multimodal (image+text) training.
+
+        Args:
+            input_ids (torch.Tensor): Input token IDs.
+            position_ids (Optional[torch.Tensor]): Position IDs.
+            attention_mask (Optional[torch.Tensor]): Attention mask.
+            past_key_values (Any): Past key values for transformer.
+            labels (Optional[torch.Tensor]): Labels for training.
+            images (Optional[Union[torch.Tensor, List[torch.Tensor]]]): Image tensor(s).
+            image_sizes (Optional[List[Tuple[int, int]]]): List of image sizes.
+
+        Returns:
+            Tuple: (None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels)
+        """
         vision_tower = self.get_vision_tower()
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
             return input_ids, position_ids, attention_mask, past_key_values, None, labels
@@ -224,21 +296,21 @@ class LlavaMetaForCausalLM(ABC):
                 continue
 
             image_token_indices = [-1] + torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0].tolist() + [cur_input_ids.shape[0]]
-            cur_input_ids_noim = []
+            cur_input_ids_no_image = []
             cur_labels = labels[batch_idx]
-            cur_labels_noim = []
+            cur_labels_no_image = []
             for i in range(len(image_token_indices) - 1):
-                cur_input_ids_noim.append(cur_input_ids[image_token_indices[i] + 1:image_token_indices[i + 1]])
-                cur_labels_noim.append(cur_labels[image_token_indices[i] + 1:image_token_indices[i + 1]])
-            split_sizes = [x.shape[0] for x in cur_labels_noim]
-            cur_input_embeds = self.get_model().embed_tokens(torch.cat(cur_input_ids_noim))
-            cur_input_embeds_no_im = torch.split(cur_input_embeds, split_sizes, dim=0)
+                cur_input_ids_no_image.append(cur_input_ids[image_token_indices[i] + 1:image_token_indices[i + 1]])
+                cur_labels_no_image.append(cur_labels[image_token_indices[i] + 1:image_token_indices[i + 1]])
+            split_sizes = [x.shape[0] for x in cur_labels_no_image]
+            cur_input_embeds = self.get_model().embed_tokens(torch.cat(cur_input_ids_no_image))
+            cur_input_embeds_no_image = torch.split(cur_input_embeds, split_sizes, dim=0)
             cur_new_input_embeds = []
             cur_new_labels = []
 
             for i in range(num_images + 1):
-                cur_new_input_embeds.append(cur_input_embeds_no_im[i])
-                cur_new_labels.append(cur_labels_noim[i])
+                cur_new_input_embeds.append(cur_input_embeds_no_image[i])
+                cur_new_labels.append(cur_labels_no_image[i])
                 if i < num_images:
                     cur_image_features = image_features[cur_image_idx]
                     cur_image_idx += 1
@@ -306,7 +378,13 @@ class LlavaMetaForCausalLM(ABC):
 
         return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels
 
-    def initialize_vision_tokenizer(self, model_args, tokenizer):
+    def initialize_vision_tokenizer(self, model_args: Any, tokenizer: Any) -> None:
+        """Initialize tokenizer for vision tokens.
+
+        Args:
+            model_args (Any): Model arguments containing vision token settings.
+            tokenizer (Any): Tokenizer object.
+        """
         if model_args.mm_use_im_patch_token:
             tokenizer.add_tokens([DEFAULT_IMAGE_PATCH_TOKEN], special_tokens=True)
             self.resize_token_embeddings(len(tokenizer))
@@ -319,10 +397,8 @@ class LlavaMetaForCausalLM(ABC):
                 input_embeddings = self.get_input_embeddings().weight.data
                 output_embeddings = self.get_output_embeddings().weight.data
 
-                input_embeddings_avg = input_embeddings[:-num_new_tokens].mean(
-                    dim=0, keepdim=True)
-                output_embeddings_avg = output_embeddings[:-num_new_tokens].mean(
-                    dim=0, keepdim=True)
+                input_embeddings_avg = input_embeddings[:-num_new_tokens].mean(dim=0, keepdim=True)
+                output_embeddings_avg = output_embeddings[:-num_new_tokens].mean(dim=0, keepdim=True)
 
                 input_embeddings[-num_new_tokens:] = input_embeddings_avg
                 output_embeddings[-num_new_tokens:] = output_embeddings_avg
