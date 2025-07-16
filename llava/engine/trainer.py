@@ -11,10 +11,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-import os
-from typing import Any, List, Optional
+from pathlib import Path
+from typing import Any, Iterator, List, Optional
 
+import bitsandbytes
 import torch
+from deepspeed import zero
+from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 from torch import nn
 from torch.utils.data import Sampler
 from transformers import Trainer
@@ -23,8 +26,10 @@ from transformers.trainer import (
     get_parameter_names,
     has_length,
     ALL_LAYERNORM_LAYERS,
-    logger,
 )
+from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
+
+from llava.utils.events import LOGGER
 
 __all__ = [
     "LengthGroupedSampler", "LLaVATrainer", "get_mm_adapter_state_maybe_zero_3", "get_modality_length_grouped_indices", "maybe_zero_3",
@@ -33,6 +38,8 @@ __all__ = [
 
 
 class LengthGroupedSampler(Sampler):
+    """Sampler that groups samples by length or modality."""
+
     def __init__(
             self,
             batch_size: int,
@@ -47,17 +54,18 @@ class LengthGroupedSampler(Sampler):
             batch_size (int): Batch size.
             world_size (int): Number of distributed workers.
             lengths (Optional[List[int]]): List of sample lengths.
-            generator (Optional[torch.Generator], optional): Random generator. Defaults to None.
-            group_by_modality (bool, optional): Whether to group by modality. Defaults to False.
+            generator (Optional[torch.Generator], optional): Random generator. Defaults to ``None``.
+            group_by_modality (bool, optional): Whether to group by modality. Defaults to ``False``.
         """
+        super().__init__()
         if lengths is None:
             raise ValueError("Lengths must be provided.")
 
-        self.batch_size = batch_size
-        self.world_size = world_size
-        self.lengths = lengths
-        self.generator = generator
-        self.group_by_modality = group_by_modality
+        self.batch_size: int = batch_size
+        self.world_size: int = world_size
+        self.lengths: Optional[List[int]] = lengths
+        self.generator: Optional[torch.Generator] = generator
+        self.group_by_modality: bool = group_by_modality
 
     def __len__(self) -> int:
         """Returns the number of samples.
@@ -67,7 +75,7 @@ class LengthGroupedSampler(Sampler):
         """
         return len(self.lengths)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[int]:
         """Yields indices for sampling.
 
         Returns:
@@ -81,6 +89,7 @@ class LengthGroupedSampler(Sampler):
 
 
 class LLaVATrainer(Trainer):
+    """LLaVATrainer class for LLaVA models, extending the base Trainer with custom functionality."""
 
     def _get_train_sampler(self) -> Optional[torch.utils.data.Sampler]:
         """Returns the training sampler, optionally grouping by modality length.
@@ -111,38 +120,36 @@ class LLaVATrainer(Trainer):
         if is_sagemaker_mp_enabled():
             return super().create_optimizer()
 
-        opt_model = self.model
-
         if self.optimizer is None:
-            decay_parameters = get_parameter_names(opt_model, ALL_LAYERNORM_LAYERS)
+            decay_parameters = get_parameter_names(self.model, ALL_LAYERNORM_LAYERS)
             decay_parameters = [name for name in decay_parameters if "bias" not in name]
             if self.args.mm_projector_lr is not None:
-                projector_parameters = [name for name, _ in opt_model.named_parameters() if "mm_projector" in name]
+                projector_parameters = [name for name, _ in self.model.named_parameters() if "mm_projector" in name]
                 optimizer_grouped_parameters = [
                     {
                         "params": [
-                            p for n, p in opt_model.named_parameters() if
+                            p for n, p in self.model.named_parameters() if
                             (n in decay_parameters and n not in projector_parameters and p.requires_grad)
                         ],
                         "weight_decay": self.args.weight_decay,
                     },
                     {
                         "params": [
-                            p for n, p in opt_model.named_parameters() if
+                            p for n, p in self.model.named_parameters() if
                             (n not in decay_parameters and n not in projector_parameters and p.requires_grad)
                         ],
                         "weight_decay": 0.0,
                     },
                     {
                         "params": [
-                            p for n, p in opt_model.named_parameters() if (n in decay_parameters and n in projector_parameters and p.requires_grad)
+                            p for n, p in self.model.named_parameters() if (n in decay_parameters and n in projector_parameters and p.requires_grad)
                         ],
                         "weight_decay": self.args.weight_decay,
                         "lr": self.args.mm_projector_lr,
                     },
                     {
                         "params": [
-                            p for n, p in opt_model.named_parameters() if
+                            p for n, p in self.model.named_parameters() if
                             (n not in decay_parameters and n in projector_parameters and p.requires_grad)
                         ],
                         "weight_decay": 0.0,
@@ -153,13 +160,13 @@ class LLaVATrainer(Trainer):
                 optimizer_grouped_parameters = [
                     {
                         "params": [
-                            p for n, p in opt_model.named_parameters() if (n in decay_parameters and p.requires_grad)
+                            p for n, p in self.model.named_parameters() if (n in decay_parameters and p.requires_grad)
                         ],
                         "weight_decay": self.args.weight_decay,
                     },
                     {
                         "params": [
-                            p for n, p in opt_model.named_parameters() if (n not in decay_parameters and p.requires_grad)
+                            p for n, p in self.model.named_parameters() if (n not in decay_parameters and p.requires_grad)
                         ],
                         "weight_decay": 0.0,
                     },
@@ -168,19 +175,18 @@ class LLaVATrainer(Trainer):
             optimizer_cls, optimizer_kwargs = Trainer.get_optimizer_cls_and_kwargs(self.args)
 
             self.optimizer = optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs)
+            # If using Adam8bit, register modules to optimize in fp32.
             if optimizer_cls.__name__ == "Adam8bit":
-                import bitsandbytes
-
                 manager = bitsandbytes.optim.GlobalOptimManager.get_instance()
 
                 skipped = 0
-                for module in opt_model.modules():
+                for module in self.model.modules():
                     if isinstance(module, nn.Embedding):
                         skipped += sum({p.data_ptr(): p.numel() for p in module.parameters()}.values())
-                        logger.info(f"skipped {module}: {skipped / 2 ** 20}M params")
+                        LOGGER.info(f"skipped {module}: {skipped / 2 ** 20}M params")
                         manager.register_module_override(module, "weight", {"optim_bits": 32})
-                        logger.debug(f"bitsandbytes: will optimize {module} in fp32")
-                logger.info(f"skipped: {skipped / 2 ** 20}M params")
+                        LOGGER.debug(f"bitsandbytes: will optimize {module} in fp32")
+                LOGGER.info(f"skipped: {skipped / 2 ** 20}M params")
 
         return self.optimizer
 
@@ -193,13 +199,12 @@ class LLaVATrainer(Trainer):
             metrics (Optional[dict], optional): Training metrics. Defaults to None.
         """
         if getattr(self.args, "tune_mm_mlp_adapter", False):
-            from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
             checkpoint_folder = f"{PREFIX_CHECKPOINT_DIR}-{self.state.global_step}"
 
             run_dir = self._get_output_dir(trial=trial)
-            output_dir = os.path.join(run_dir, checkpoint_folder)
+            output_dir = str(Path(run_dir, checkpoint_folder))
 
-            # Only save Adapter
+            # Only save Adapter.
             keys_to_match = ["mm_projector", "vision_resampler"]
             if getattr(self.args, "use_im_start_end", False):
                 keys_to_match.extend(["embed_tokens", "embed_in"])
@@ -208,9 +213,9 @@ class LLaVATrainer(Trainer):
 
             if self.args.local_rank == 0 or self.args.local_rank == -1:
                 self.model.config.save_pretrained(output_dir)
-                torch.save(weight_to_save, os.path.join(output_dir, f"mm_projector.bin"))
+                torch.save(weight_to_save, str(Path(output_dir, f"mm_projector.bin")))
         else:
-            super(LLaVATrainer, self)._save_checkpoint(model, trial, metrics)
+            super(Trainer, self)._save_checkpoint(model, trial, metrics)
 
     def _save(self, output_dir: Optional[str] = None, state_dict: Optional[dict] = None) -> None:
         """Saves the model and state dict.
@@ -222,7 +227,7 @@ class LLaVATrainer(Trainer):
         if getattr(self.args, "tune_mm_mlp_adapter", False):
             pass
         else:
-            super(LLaVATrainer, self)._save(output_dir, state_dict)
+            super(Trainer, self)._save(output_dir, state_dict)
 
 
 def get_mm_adapter_state_maybe_zero_3(
@@ -261,28 +266,32 @@ def get_modality_length_grouped_indices(
         List[int]: Grouped and shuffled indices.
     """
     assert all(l != 0 for l in lengths), "Should not have zero length."
+
     if all(l > 0 for l in lengths) or all(l < 0 for l in lengths):
         return get_length_grouped_indices(lengths, batch_size, world_size, generator=generator)
+
+    # multi-modal sample.
     mm_indices, mm_lengths = zip(*[(i, l) for i, l in enumerate(lengths) if l > 0])
+    # language sample.
     lang_indices, lang_lengths = zip(*[(i, -l) for i, l in enumerate(lengths) if l < 0])
 
     mm_shuffle = [mm_indices[i] for i in get_length_grouped_indices(mm_lengths, batch_size, world_size, generator=None)]
     lang_shuffle = [lang_indices[i] for i in get_length_grouped_indices(lang_lengths, batch_size, world_size, generator=None)]
     megabatch_size = world_size * batch_size
-    mm_megabatches = [mm_shuffle[i: i + megabatch_size] for i in range(0, len(mm_shuffle), megabatch_size)]
-    lang_megabatches = [lang_shuffle[i: i + megabatch_size] for i in range(0, len(lang_shuffle), megabatch_size)]
+    mm_mega_batches = [mm_shuffle[i: i + megabatch_size] for i in range(0, len(mm_shuffle), megabatch_size)]
+    lang_mega_batches = [lang_shuffle[i: i + megabatch_size] for i in range(0, len(lang_shuffle), megabatch_size)]
 
-    last_mm = mm_megabatches[-1]
-    last_lang = lang_megabatches[-1]
+    last_mm = mm_mega_batches[-1]
+    last_lang = lang_mega_batches[-1]
     additional_batch = last_mm + last_lang
-    megabatches = mm_megabatches[:-1] + lang_megabatches[:-1]
-    megabatch_indices = torch.randperm(len(megabatches), generator=generator)
-    megabatches = [megabatches[i] for i in megabatch_indices]
+    mega_batches = mm_mega_batches[:-1] + lang_mega_batches[:-1]
+    megabatch_indices = torch.randperm(len(mega_batches), generator=generator)
+    mega_batches = [mega_batches[i] for i in megabatch_indices]
 
     if len(additional_batch) > 0:
-        megabatches.append(sorted(additional_batch))
+        mega_batches.append(sorted(additional_batch))
 
-    return [i for megabatch in megabatches for i in megabatch]
+    return [i for megabatch in mega_batches for i in megabatch]
 
 
 def get_length_grouped_indices(
@@ -290,7 +299,6 @@ def get_length_grouped_indices(
         batch_size: int,
         world_size: int,
         generator: Optional[torch.Generator] = None,
-        merge: bool = True
 ) -> List[int]:
     """Groups indices by length for batching.
 
@@ -298,19 +306,22 @@ def get_length_grouped_indices(
         lengths (List[int]): List of sample lengths.
         batch_size (int): Batch size.
         world_size (int): Number of distributed workers.
-        generator (Optional[torch.Generator], optional): Random generator. Defaults to None.
-        merge (bool, optional): Whether to merge batches. Defaults to True.
+        generator (Optional[torch.Generator], optional): Random generator. Defaults to ``None``.
 
     Returns:
         List[int]: Grouped and shuffled indices.
     """
+    # Shuffle indices based on lengths.
     indices = torch.randperm(len(lengths), generator=generator)
     megabatch_size = world_size * batch_size
-    megabatches = [indices[i: i + megabatch_size].tolist() for i in range(0, len(lengths), megabatch_size)]
-    megabatches = [sorted(megabatch, key=lambda i: lengths[i], reverse=True) for megabatch in megabatches]
-    megabatches = [split_to_even_chunks(megabatch, lengths, world_size) for megabatch in megabatches]
+    # Split indices into mega_batches.
+    mega_batches = [indices[i: i + megabatch_size].tolist() for i in range(0, len(lengths), megabatch_size)]
+    # Sort each megabatch by length in descending order.
+    mega_batches = [sorted(megabatch, key=lambda i: lengths[i], reverse=True) for megabatch in mega_batches]
+    # If the last megabatch is smaller than the megabatch size, add it to the previous one.
+    mega_batches = [split_to_even_chunks(megabatch, lengths, world_size) for megabatch in mega_batches]
 
-    return [i for megabatch in megabatches for batch in megabatch for i in batch]
+    return [i for megabatch in mega_batches for batch in megabatch for i in batch]
 
 
 def maybe_zero_3(param: torch.nn.Parameter, ignore_status: bool = False, name: Optional[str] = None) -> torch.Tensor:
@@ -324,8 +335,6 @@ def maybe_zero_3(param: torch.nn.Parameter, ignore_status: bool = False, name: O
     Returns:
         torch.Tensor: The gathered and cloned parameter tensor.
     """
-    from deepspeed import zero
-    from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
     if hasattr(param, "ds_id"):
         if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
             if not ignore_status:
