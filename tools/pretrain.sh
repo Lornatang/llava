@@ -5,9 +5,9 @@ deepspeed llava/train/train_mem.py \
     --deepspeed ./tools/zero2.json \
     --model_name_or_path ./results/train/$MODEL_VERSION \
     --version $PROMPT_VERSION \
-    --data_path /path/to/pretrain_data.json \
-    --image_folder /path/to/images \
-    --vision_tower openai/clip-vit-large-patch14 \
+    --data_path ./datasets/blip_laion_cc_sbu_558k/blip_laion_cc_sbu_558k.json \
+    --image_folder ./datasets/blip_laion_cc_sbu_558k/images \
+    --vision_tower ./results/pretrained_models/openai/clip-vit-large-patch14 \
     --tune_mm_mlp_adapter True \
     --mm_vision_select_layer -2 \
     --mm_use_im_start_end False \
