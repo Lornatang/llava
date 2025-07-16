@@ -25,11 +25,15 @@ wheels/
 .vscode/
 _darcs/
 
-# pytorch/python/numpy formats
+# develop formats
 *.pth
 *.pkl
 *.npy
 *.pt
+*.json
+*.csv
+*.onnx
+*.engine
 
 # image formats
 *.jpg
