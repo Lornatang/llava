@@ -14,14 +14,17 @@
 from typing import List, Optional, Tuple, Union
 
 import torch
-import torch.nn as nn
-
-from transformers import AutoConfig, AutoModelForCausalLM, LlamaConfig, LlamaModel, LlamaForCausalLM
-
-from transformers.modeling_outputs import CausalLMOutputWithPast
+from torch import nn
+from transformers import LlamaConfig, LlamaModel, LlamaForCausalLM
 from transformers.generation.utils import GenerateOutput
+from transformers.modeling_outputs import CausalLMOutputWithPast
 
-from ..llava_arch import LlavaMetaModel, LlavaMetaForCausalLM
+from ..arch import LlavaMetaModel, LlavaMetaForCausalLM
+
+__all__ = [
+    "LlavaConfig", "LlavaLlamaModel", "LlavaLlamaForCausalLM",
+]
+
 
 class LlavaConfig(LlamaConfig):
     model_type = "llava_llama"
@@ -32,6 +35,8 @@ class LlavaLlamaModel(LlavaMetaModel, LlamaModel):
 
     def __init__(self, config: LlamaConfig):
         super().__init__(config)
+
+
 class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
     config_class = LlavaConfig
 
@@ -49,19 +54,19 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         return self.model
 
     def forward(
-        self,
-        input_ids: torch.LongTensor = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[List[torch.FloatTensor]] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        images: Optional[torch.FloatTensor] = None,
-        image_sizes: Optional[List[List[int]]] = None,
-        return_dict: Optional[bool] = None,
+            self,
+            input_ids: torch.LongTensor = None,
+            attention_mask: Optional[torch.Tensor] = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            past_key_values: Optional[List[torch.FloatTensor]] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            labels: Optional[torch.LongTensor] = None,
+            use_cache: Optional[bool] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            images: Optional[torch.FloatTensor] = None,
+            image_sizes: Optional[List[List[int]]] = None,
+            return_dict: Optional[bool] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
 
         if inputs_embeds is None:
@@ -97,11 +102,11 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
 
     @torch.no_grad()
     def generate(
-        self,
-        inputs: Optional[torch.Tensor] = None,
-        images: Optional[torch.Tensor] = None,
-        image_sizes: Optional[torch.Tensor] = None,
-        **kwargs,
+            self,
+            inputs: Optional[torch.Tensor] = None,
+            images: Optional[torch.Tensor] = None,
+            image_sizes: Optional[torch.Tensor] = None,
+            **kwargs,
     ) -> Union[GenerateOutput, torch.LongTensor]:
         position_ids = kwargs.pop("position_ids", None)
         attention_mask = kwargs.pop("attention_mask", None)

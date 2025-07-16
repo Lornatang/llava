@@ -21,8 +21,9 @@ from PIL import Image
 
 __all__ = [
     "SeparatorStyle", "Conversation",
-    "conv_vicuna_v0", "conv_vicuna_v1", "conv_llama_2", "conv_llava_llama_2", "conv_mistral_instruct", "conv_chatml_direct", "conv_llava_plain",
-    "conv_llava_v0", "conv_llava_v0_mmtag", "conv_llava_v1", "conv_llava_v1_mmtag", "conv_llava_llama_2", "conv_mpt",
+    "conv_templates", "conv_vicuna_v0", "conv_vicuna_v1", "conv_llama_2", "conv_llava_llama_2", "conv_mistral_instruct",
+    "conv_chatml_direct", "conv_llava_plain", "conv_llava_v0", "conv_llava_v0_mmtag", "conv_llava_v1", "conv_llava_v1_mmtag", "conv_llava_llama_2",
+    "conv_mpt", "default_conversation",
 ]
 
 
@@ -438,7 +439,6 @@ conv_llava_v1_mmtag = Conversation(
     version="v1_mmtag",
 )
 
-default_conversation = conv_vicuna_v1
 conv_templates = {
     "default": conv_vicuna_v0,
     "v0": conv_vicuna_v0,
@@ -459,3 +459,4 @@ conv_templates = {
 
     "mpt": conv_mpt,
 }
+default_conversation = conv_vicuna_v1

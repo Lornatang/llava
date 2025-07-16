@@ -22,6 +22,40 @@ from llava.utils.ops import get_anyres_image_grid_shape
 from .multimodal_encoder.builder import build_vision_tower
 from .multimodal_projector.builder import build_vision_projector
 
+__all__ = [
+    "unpad_image", "LlavaMetaModel", "LlavaMetaForCausalLM",
+]
+
+
+def unpad_image(x: torch.Tensor, original_size: Tuple[int, int]) -> torch.Tensor:
+    """Remove padding from an image tensor to restore its original size.
+
+    Args:
+        x (torch.Tensor): The padded image tensor.
+        original_size (Tuple[int, int]): The original width and height.
+
+    Returns:
+        torch.Tensor: The unpadded image tensor.
+    """
+    original_width, original_height = original_size
+    current_height, current_width = x.shape[1:]
+
+    original_aspect_ratio = original_width / original_height
+    current_aspect_ratio = current_width / current_height
+
+    if original_aspect_ratio > current_aspect_ratio:
+        scale_factor = current_width / original_width
+        new_height = int(original_height * scale_factor)
+        padding = (current_height - new_height) // 2
+        unpadded_tensor = x[:, padding:current_height - padding, :]
+    else:
+        scale_factor = current_height / original_height
+        new_width = int(original_width * scale_factor)
+        padding = (current_width - new_width) // 2
+        unpadded_tensor = x[:, :, padding:current_width - padding]
+
+    return unpadded_tensor
+
 
 class LlavaMetaModel:
     def __init__(self, config: Any) -> None:
@@ -106,36 +140,6 @@ class LlavaMetaModel:
                 return {k.split(keyword + ".")[1]: v for k, v in weights.items() if keyword in k}
 
             self.mm_projector.load_state_dict(get_w(mm_projector_weights, "mm_projector"))
-
-
-def unpad_image(x: torch.Tensor, original_size: Tuple[int, int]) -> torch.Tensor:
-    """Remove padding from an image tensor to restore its original size.
-
-    Args:
-        x (torch.Tensor): The padded image tensor.
-        original_size (Tuple[int, int]): The original width and height.
-
-    Returns:
-        torch.Tensor: The unpadded image tensor.
-    """
-    original_width, original_height = original_size
-    current_height, current_width = x.shape[1:]
-
-    original_aspect_ratio = original_width / original_height
-    current_aspect_ratio = current_width / current_height
-
-    if original_aspect_ratio > current_aspect_ratio:
-        scale_factor = current_width / original_width
-        new_height = int(original_height * scale_factor)
-        padding = (current_height - new_height) // 2
-        unpadded_tensor = x[:, padding:current_height - padding, :]
-    else:
-        scale_factor = current_height / original_height
-        new_width = int(original_width * scale_factor)
-        padding = (current_width - new_width) // 2
-        unpadded_tensor = x[:, :, padding:current_width - padding]
-
-    return unpadded_tensor
 
 
 class LlavaMetaForCausalLM(ABC):

@@ -11,5 +11,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-from .llama import LlavaConfig, LlavaLlamaModel, LlavaLlamaForCausalLM
-from .mpt import LlavaMptConfig, LlavaMptModel, LlavaMptForCausalLM
+from .builder import build_vision_tower
+from .clip_encoder import CLIPVisionTower, CLIPVisionTowerS2
