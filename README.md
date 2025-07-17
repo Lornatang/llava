@@ -70,6 +70,13 @@ huggingface-cli download openai/clip-vit-large-patch14-336 --local-dir ./results
 huggingface-cli download lmsys/vicuna-13b-v1.5 --local-dir ./results/pretrained_models/lmsys/vicuna-13b-v1.5
 ```
 
+The following models can be downloaded for quick experimentation.
+
+```bash
+# Tiny-Vicuna-1B
+huggingface-cli download Jiayi-Pan/Tiny-Vicuna-1B --local-dir ./results/pretrained_models/Jiayi-Pan/Tiny-Vicuna-1B
+```
+
 #### 2. Run pretrain script
 
 ```bash
