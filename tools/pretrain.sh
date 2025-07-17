@@ -1,5 +1,5 @@
 deepspeed ./tools/train.py \
-    --deepspeed ./tools/zero2.json \
+    --deepspeed ./tools/zero3.json \
     --model_name_or_path ./results/pretrained_models/lmsys/vicuna-13b-v1.5 \
     --version plain \
     --data_path ./datasets/llava_pretrain/blip_laion_cc_sbu_558k.json \
