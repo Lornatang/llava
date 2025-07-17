@@ -72,12 +72,9 @@ huggingface-cli download lmsys/vicuna-13b-v1.5 --local-dir ./results/pretrained_
 
 The following models can be downloaded for quick experimentation.
 
-```bash
-# TinyLlama-1.1B-Chat-v1.0
-huggingface-cli download TinyLlama/TinyLlama-1.1B-Chat-v1.0 --local-dir ./results/pretrained_models/TinyLlama/TinyLlama-1.1B-Chat-v1.0
-# Tiny-Vicuna-1B (From TinyLlama-1.1B-Chat-v1.0 fine-tuned)
-huggingface-cli download Jiayi-Pan/Tiny-Vicuna-1B --local-dir ./results/pretrained_models/Jiayi-Pan/Tiny-Vicuna-1B
-```
+- [SmolLM2-135M](https://huggingface.co/HuggingFaceTB/SmolLM2-135M)
+- [TinyLlama-1.1B-Chat-v1.0](https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0)
+- [Tiny-Vicuna-1B](https://huggingface.co/Jiayi-Pan/Tiny-Vicuna-1B) (From TinyLlama-1.1B-Chat-v1.0 fine-tuned)
 
 #### 2. Run pretrain script
 
