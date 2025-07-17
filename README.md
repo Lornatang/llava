@@ -15,7 +15,7 @@ cd llava
 
 **2. Install Package**
 
-```Shell
+```bash
 conda create -n llava python=3.11.13 -y
 conda activate llava
 pip3 install --upgrade pip
