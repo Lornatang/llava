@@ -1,24 +1,25 @@
 deepspeed ./tools/train.py \
     --deepspeed ./tools/zero2.json \
-    --model_name_or_path ./results/pretrained_models/lmsys/vicuna-7b-v1.3 \
+    --model_name_or_path ./results/pretrained_models/lmsys/vicuna-13b-v1.5 \
     --version plain \
     --data_path ./datasets/llava_pretrain/blip_laion_cc_sbu_558k.json \
     --image_folder ./datasets/llava_pretrain/images \
     --vision_tower ./results/pretrained_models/openai/clip-vit-large-patch14-336 \
+    --mm_projector_type mlp2x_gelu \
     --tune_mm_mlp_adapter True \
     --mm_vision_select_layer -2 \
     --mm_use_im_start_end False \
     --mm_use_im_patch_token False \
     --bf16 True \
-    --output_dir ./results/train/pretrain/llava-vicuna_7b_v1_3 \
+    --output_dir ./results/train/pretrain/llava-vicuna_13b_v1_5 \
     --num_train_epochs 1 \
-    --per_device_train_batch_size 16 \
+    --per_device_train_batch_size 32 \
     --per_device_eval_batch_size 4 \
     --gradient_accumulation_steps 1 \
     --save_strategy "steps" \
     --save_steps 24000 \
     --save_total_limit 1 \
-    --learning_rate 2e-3 \
+    --learning_rate 1e-3 \
     --weight_decay 0. \
     --warmup_ratio 0.03 \
     --lr_scheduler_type "cosine" \

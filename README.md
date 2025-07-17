@@ -67,7 +67,7 @@ We follow the original author's training methods and training hyperparameters, a
 
 ```bash
 huggingface-cli download openai/clip-vit-large-patch14-336 --local-dir ./results/pretrained_models/openai/clip-vit-large-patch14-336
-huggingface-cli download lmsys/vicuna-7b-v1.3 --local-dir ./results/pretrained_models/lmsys/vicuna-7b-v1.3
+huggingface-cli download lmsys/vicuna-13b-v1.5 --local-dir ./results/pretrained_models/lmsys/vicuna-13b-v1.5
 ```
 
 #### 2. Run pretrain script
