@@ -23,9 +23,11 @@ import torch
 import torch.utils.data
 import transformers
 from PIL import Image
+from deepspeed import zero
+from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 
-from llava.engine.trainer import LLaVATrainer
 from llava.constants import IGNORE_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
+from llava.engine.trainer import LLaVATrainer
 from llava.models.llm.llama import LlavaLlamaForCausalLM
 from llava.models.llm.mpt import LlavaMptForCausalLM
 from llava.utils.conversation import SeparatorStyle, conv_templates, default_conversation
@@ -103,8 +105,6 @@ class TrainingArguments(transformers.TrainingArguments):
 
 
 def maybe_zero_3(param, ignore_status=False, name=None):
-    from deepspeed import zero
-    from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
     if hasattr(param, "ds_id"):
         if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
             if not ignore_status:
@@ -779,8 +779,7 @@ def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer,
 def train(attn_implementation=None):
     global local_rank
 
-    parser = transformers.HfArgumentParser(
-        (ModelArguments, DataArguments, TrainingArguments))
+    parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     local_rank = training_args.local_rank
     compute_dtype = (torch.float16 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32))
@@ -875,7 +874,7 @@ def train(attn_implementation=None):
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
             model_max_length=training_args.model_max_length,
-            padding_side="right"
+            padding_side="right",
         )
     else:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
@@ -954,7 +953,7 @@ def train(attn_implementation=None):
     data_module = make_supervised_data_module(tokenizer=tokenizer,
                                               data_args=data_args)
     trainer = LLaVATrainer(model=model,
-                           tokenizer=tokenizer,
+                           processing_class=tokenizer,
                            args=training_args,
                            **data_module)
 
