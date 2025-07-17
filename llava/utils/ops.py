@@ -20,7 +20,7 @@ from typing import Any, List, Tuple, Union, Optional
 import torch
 from PIL import Image
 
-from llava.models import IMAGE_TOKEN_INDEX
+from llava.constants import IMAGE_TOKEN_INDEX
 
 __all__ = [
     "divide_to_patches", "expand2square", "load_image_from_base64", "get_anyres_image_grid_shape",

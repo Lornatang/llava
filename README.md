@@ -2,6 +2,29 @@
 
 LLaVA: Large Language and Vision Assistant. From data to deployment.
 
+## Install
+
+**Please note that this is only supported on Linux systems.**
+
+**1. Clone repository**
+
+```bash
+git clone https://github.com/Lornatang/llava.git
+cd llava
+```
+
+**2. Install Package**
+
+```Shell
+conda create -n llava python=3.11.13 -y
+conda activate llava
+pip3 install --upgrade pip
+pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+wget https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.1/flash_attn-2.8.1+cu12torch2.7cxx11abiTRUE-cp311-cp311-linux_x86_64.whl
+pip3 install flash_attn-2.8.1+cu12torch2.7cxx11abiTRUE-cp311-cp311-linux_x86_64.whl
+pip3 install -e .
+```
+
 ## Train
 
 ### Introduction
@@ -24,10 +47,15 @@ Please place the downloaded files into the datasets directory according to the f
     - blip_laion_cc_sbu_558k
         - blip_laion_cc_sbu_558k.json
         - blip_laion_cc_sbu_558k_meta.json
-        - images
-            - 000000000000.jpg
-            - 000000000001.jpg
-            ...
+        - 00000
+          - 000000010.jpg
+          - 000000012.jpg
+          ...
+        - 00001
+          - 000010012.jpg
+          - 000010015.jpg
+          - ...
+        ...
 ```
 
 ### Pre-training
@@ -40,7 +68,13 @@ We follow the original author's training methods and training hyperparameters, a
 huggingface-cli download openai/clip-vit-large-patch14 --local-dir ./results/pretrained_models/openai/clip-vit-large-patch14 
 ```
 
-#### 2. Run pre-training script
+#### 2. Manually download Vicuna-7b-v1.3 model weights
+
+```bash
+huggingface-cli download lmsys/vicuna-7b-v1.3 --local-dir ./results/pretrained_models/lmsys/vicuna-7b-v1.3
+``` 
+
+#### 3. Run pretrain script
 
 ```bash
 bash ./tools/pretrain.sh
