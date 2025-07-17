@@ -5,8 +5,8 @@ deepspeed ./tools/train.py \
     --deepspeed ./tools/zero2.json \
     --model_name_or_path ./results/pretrained_models/lmsys/vicuna-7b-v1.3 \
     --version plain \
-    --data_path ./datasets/blip_laion_cc_sbu_558k/blip_laion_cc_sbu_558k.json \
-    --image_folder ./datasets/blip_laion_cc_sbu_558k \
+    --data_path ./datasets/llava_pretrain/blip_laion_cc_sbu_558k.json \
+    --image_folder ./datasets/llava_pretrain \
     --vision_tower ./results/pretrained_models/openai/clip-vit-large-patch14 \
     --tune_mm_mlp_adapter True \
     --mm_vision_select_layer -2 \
