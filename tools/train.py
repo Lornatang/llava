@@ -25,6 +25,7 @@ import transformers
 from PIL import Image
 from deepspeed import zero
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
+from peft.tuners.lora import LoraLayer
 
 from llava.constants import IGNORE_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.engine.trainer import LLaVATrainer
@@ -938,7 +939,6 @@ def train(attn_implementation=None):
         model.initialize_vision_tokenizer(model_args, tokenizer=tokenizer)
 
     if training_args.bits in [4, 8]:
-        from peft.tuners.lora import LoraLayer
         for name, module in model.named_modules():
             if isinstance(module, LoraLayer):
                 if training_args.bf16:
