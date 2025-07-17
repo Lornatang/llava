@@ -47,14 +47,15 @@ Please place the downloaded files into the datasets directory according to the f
     - blip_laion_cc_sbu_558k
         - blip_laion_cc_sbu_558k.json
         - blip_laion_cc_sbu_558k_meta.json
-        - 00000
-          - 000000010.jpg
-          - 000000012.jpg
-          ...
-        - 00001
-          - 000010012.jpg
-          - 000010015.jpg
-          - ...
+        - images
+            - 00000
+              - 000000010.jpg
+              - 000000012.jpg
+              ...
+            - 00001
+              - 000010012.jpg
+              - 000010015.jpg
+              - ...
         ...
 ```
 

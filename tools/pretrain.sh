@@ -1,12 +1,9 @@
-MODEL_VERSION=vicuna-v1-3-7b
-PROMPT_VERSION=plain
-
 deepspeed ./tools/train.py \
     --deepspeed ./tools/zero2.json \
     --model_name_or_path ./results/pretrained_models/lmsys/vicuna-7b-v1.3 \
     --version plain \
     --data_path ./datasets/llava_pretrain/blip_laion_cc_sbu_558k.json \
-    --image_folder ./datasets/llava_pretrain \
+    --image_folder ./datasets/llava_pretrain/images \
     --vision_tower ./results/pretrained_models/openai/clip-vit-large-patch14-336 \
     --tune_mm_mlp_adapter True \
     --mm_vision_select_layer -2 \

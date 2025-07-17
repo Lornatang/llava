@@ -776,7 +776,7 @@ def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer,
                 data_collator=data_collator)
 
 
-def train(attn_implementation="flash_attention_2"):
+def train(attn_implementation=None):
     global local_rank
 
     parser = transformers.HfArgumentParser(

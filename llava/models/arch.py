@@ -65,8 +65,6 @@ class LlavaMetaModel:
             config (Any): Model configuration object.
         """
         super().__init__(config)
-
-        self.config = None
         if hasattr(config, "mm_vision_tower"):
             self.vision_tower = build_vision_tower(config, delay_load=True)
             self.mm_projector = build_vision_projector(config)
