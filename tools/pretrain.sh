@@ -7,7 +7,7 @@ deepspeed ./tools/train.py \
     --version plain \
     --data_path ./datasets/llava_pretrain/blip_laion_cc_sbu_558k.json \
     --image_folder ./datasets/llava_pretrain \
-    --vision_tower ./results/pretrained_models/openai/clip-vit-large-patch14 \
+    --vision_tower ./results/pretrained_models/openai/clip-vit-large-patch14-336 \
     --tune_mm_mlp_adapter True \
     --mm_vision_select_layer -2 \
     --mm_use_im_start_end False \

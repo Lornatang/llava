@@ -62,19 +62,14 @@ Please place the downloaded files into the datasets directory according to the f
 
 We follow the original author's training methods and training hyperparameters, and use the DeepSpeed ZeRO-2 tool to complete model pre-training.
 
-#### 1. Manually download CLIP model weights
+#### 1. Manually download pretrained model weights
 
 ```bash
-huggingface-cli download openai/clip-vit-large-patch14 --local-dir ./results/pretrained_models/openai/clip-vit-large-patch14 
+huggingface-cli download openai/clip-vit-large-patch14-336 --local-dir ./results/pretrained_models/openai/clip-vit-large-patch14-336
+huggingface-cli download lmsys/vicuna-7b-v1.3 --local-dir ./results/pretrained_models/lmsys/vicuna-7b-v1.3
 ```
 
-#### 2. Manually download Vicuna-7b-v1.3 model weights
-
-```bash
-huggingface-cli download lmsys/vicuna-7b-v1.3 --local-dir ./results/pretrained_models/lmsys/vicuna-7b-v1.3
-``` 
-
-#### 3. Run pretrain script
+#### 2. Run pretrain script
 
 ```bash
 bash ./tools/pretrain.sh
@@ -82,4 +77,28 @@ bash ./tools/pretrain.sh
 
 More details about train please see: [pretrain.sh](./tools/pretrain.sh)
 
+## Citation
 
+```bibtex
+@misc{liu2024llavanext,
+    title={LLaVA-NeXT: Improved reasoning, OCR, and world knowledge},
+    url={https://llava-vl.github.io/blog/2024-01-30-llava-next/},
+    author={Liu, Haotian and Li, Chunyuan and Li, Yuheng and Li, Bo and Zhang, Yuanhan and Shen, Sheng and Lee, Yong Jae},
+    month={January},
+    year={2024}
+}
+
+@misc{liu2023improvedllava,
+      title={Improved Baselines with Visual Instruction Tuning}, 
+      author={Liu, Haotian and Li, Chunyuan and Li, Yuheng and Lee, Yong Jae},
+      publisher={arXiv:2310.03744},
+      year={2023},
+}
+
+@misc{liu2023llava,
+      title={Visual Instruction Tuning}, 
+      author={Liu, Haotian and Li, Chunyuan and Wu, Qingyang and Lee, Yong Jae},
+      publisher={NeurIPS},
+      year={2023},
+}
+```
