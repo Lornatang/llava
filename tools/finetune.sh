@@ -13,7 +13,7 @@ deepspeed ./tools/train.py \
     --image_aspect_ratio pad \
     --group_by_modality_length True \
     --bf16 True \
-    --output_dir ./results/./results/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-finetune-llava_v1_5_mix665k \
+    --output_dir ./results/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-finetune-llava_v1_5_mix665k \
     --num_train_epochs 1 \
     --per_device_train_batch_size 16 \
     --per_device_eval_batch_size 4 \
