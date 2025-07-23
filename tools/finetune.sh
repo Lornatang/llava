@@ -1,5 +1,5 @@
 deepspeed ./tools/train.py \
-    --deepspeed ./scripts/zero3.json \
+    --deepspeed ./tools/zero3.json \
     --model_name_or_path ./results/pretrained_models/lmsys/vicuna-13b-v1.5 \
     --version v1 \
     --data_path ./datasets/llava_finetune/llava_v1_5_mix665k.json \
