@@ -14,9 +14,8 @@
 import copy
 import json
 import logging
-import os
-import pathlib
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, Optional, Sequence
 
 import torch
@@ -175,6 +174,7 @@ def find_all_linear_names(model):
 
 def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str):
     """Collects the state dict and dump to disk."""
+    output_path = Path(output_dir)
 
     if getattr(trainer.args, "tune_mm_mlp_adapter", False):
         # Only save Adapter
@@ -185,15 +185,16 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
         weight_to_save = get_mm_adapter_state_maybe_zero_3(trainer.model.named_parameters(), keys_to_match)
         trainer.model.config.save_pretrained(output_dir)
 
-        current_folder = output_dir.split("/")[-1]
-        parent_folder = os.path.dirname(output_dir)
+        output_name = output_path.name
         if trainer.args.local_rank == 0 or trainer.args.local_rank == -1:
-            if current_folder.startswith("checkpoint-"):
-                mm_projector_folder = os.path.join(parent_folder, "mm_projector")
-                os.makedirs(mm_projector_folder, exist_ok=True)
-                torch.save(weight_to_save, os.path.join(mm_projector_folder, f"{current_folder}.bin"))
+            if output_name.startswith("checkpoint-"):
+                mm_projector_folder = Path(output_path.parent, "mm_projector")
+                mm_projector_folder.mkdir(parents=True, exist_ok=True)
+                save_path = Path(mm_projector_folder, f"{output_name}.bin")
+                torch.save(weight_to_save, save_path)
             else:
-                torch.save(weight_to_save, os.path.join(output_dir, f"mm_projector.bin"))
+                save_path = Path(output_path, "mm_projector.bin")
+                torch.save(weight_to_save, save_path)
         return
 
     if trainer.deepspeed:
@@ -689,7 +690,7 @@ class LazySupervisedDataset(torch.utils.data.Dataset):
             image_file = self.list_data_dict[i]["image"]
             image_folder = self.data_args.image_folder
             processor = self.data_args.image_processor
-            image = Image.open(os.path.join(image_folder, image_file)).convert("RGB")
+            image = Image.open(Path(image_folder, image_file)).convert("RGB")
             if self.data_args.image_aspect_ratio == "pad":
                 def expand2square(pil_image, background_color):
                     width, height = pil_image.size
@@ -957,7 +958,7 @@ def train(attn_implementation=None):
                            args=training_args,
                            **data_module)
 
-    if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
+    if list(Path(training_args.output_dir).glob("checkpoint-*")):
         trainer.train(resume_from_checkpoint=True)
     else:
         trainer.train()
@@ -975,7 +976,7 @@ def train(attn_implementation=None):
         if training_args.local_rank == 0 or training_args.local_rank == -1:
             model.config.save_pretrained(training_args.output_dir)
             model.save_pretrained(training_args.output_dir, state_dict=state_dict)
-            torch.save(non_lora_state_dict, os.path.join(training_args.output_dir, "non_lora_trainables.bin"))
+            torch.save(non_lora_state_dict, Path(training_args.output_dir, "non_lora_trainables.bin"))
     else:
         safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
 
