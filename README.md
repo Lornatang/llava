@@ -40,28 +40,43 @@ The LAION-CC-SBU with BLIP captions dataset with 558k data is used for pre-train
 - [blip_laion_cc_sbu_558k_meta.json](https://huggingface.co/datasets/liuhaotian/LLaVA-Pretrain/blob/main/blip_laion_cc_sbu_558k_meta.json)
 - [images.zip](https://huggingface.co/datasets/liuhaotian/LLaVA-Pretrain/blob/main/images.zip)
 
+This is the official mixed dataset annotation, please download it for fine-tuning.
+- [llava_v1_5_mix665k.json](https://huggingface.co/datasets/liuhaotian/LLaVA-Instruct-150K/blob/main/llava_v1_5_mix665k.json)
+- [coco train2017](http://images.cocodataset.org/zips/train2017.zip)
+- [gqa images](https://downloads.cs.stanford.edu/nlp/data/gqa/images.zip)
+- [ocr_vqa images](https://drive.google.com/drive/folders/1_GYPY5UkUy7HIcR0zq3ZCFgeZN7BAfm_?usp=sharing)
+- [textvqa train_val_images](https://drive.google.com/drive/folders/1_GYPY5UkUy7HIcR0zq3ZCFgeZN7BAfm_?usp=sharing)
+- [vg part1](https://cs.stanford.edu/people/rak248/VG_100K_2/images.zip) 
+- [vg part2](https://cs.stanford.edu/people/rak248/VG_100K_2/images2.zip)
+
 Please place the downloaded files into the datasets directory according to the following format requirements.
 
 ```txt
 - datasets
-    - blip_laion_cc_sbu_558k
-        - blip_laion_cc_sbu_558k.json
-        - blip_laion_cc_sbu_558k_meta.json
-        - images
-            - 00000
-              - 000000010.jpg
-              - 000000012.jpg
-              ...
-            - 00001
-              - 000010012.jpg
-              - 000010015.jpg
-              - ...
-        ...
+    - llava_pretrain
+        - blip_laion_cc_sbu_558k
+            - blip_laion_cc_sbu_558k.json
+            - blip_laion_cc_sbu_558k_meta.json
+            - images
+    - llava_finetune
+        - llava_v1_5_mix665k.json
+        - coco
+            - train2017
+        - gqa
+            - images
+        - ocr_vqa
+            - images
+        - textvqa
+            - train_val_images
+        - vg
+            - VG_100K
+            - VG_100K_2
+             
 ```
 
 ### Pre-training
 
-We follow the original author's training methods and training hyperparameters, and use the DeepSpeed ZeRO-2 tool to complete model pre-training.
+We follow the original author's training methods and training hyperparameters, and use the DeepSpeed ZeRO-3 tool to complete model pre-training.
 
 #### 1. Manually download pretrained model weights
 
@@ -82,6 +97,18 @@ bash ./tools/pretrain.sh
 ```
 
 More details about train please see: [pretrain.sh](./tools/pretrain.sh)
+
+### Fine-tuning
+
+We follow the original author's training methods and training hyperparameters, and use the DeepSpeed ZeRO-3 tool to complete model fine-tuning.
+
+#### 1. Run finetune script
+
+```bash
+bash ./tools/finetune.sh
+```
+
+More details about train please see: [finetune.sh](./tools/finetune.sh)
 
 ## Citation
 
