@@ -16,8 +16,6 @@ from typing import Any, Iterator, List, Optional
 
 import bitsandbytes
 import torch
-from deepspeed import zero
-from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 from torch import nn
 from torch.utils.data import Sampler
 from transformers import Trainer
@@ -30,10 +28,10 @@ from transformers.trainer import (
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 
 from llava.utils.events import LOGGER
+from llava.utils.ops import get_length_grouped_indices, get_multi_modality_length_grouped_indices, get_multi_modality_adapter_state_maybe_zero_3
 
 __all__ = [
-    "LengthGroupedSampler", "LLaVATrainer", "get_mm_adapter_state_maybe_zero_3", "get_modality_length_grouped_indices", "maybe_zero_3",
-    "split_to_even_chunks",
+    "LengthGroupedSampler", "LLaVATrainer",
 ]
 
 
@@ -82,7 +80,7 @@ class LengthGroupedSampler(Sampler):
             Iterator[int]: Iterator over sample indices.
         """
         if self.group_by_modality:
-            indices = get_modality_length_grouped_indices(self.lengths, self.batch_size, self.world_size, generator=self.generator)
+            indices = get_multi_modality_length_grouped_indices(self.lengths, self.batch_size, self.world_size, generator=self.generator)
         else:
             indices = get_length_grouped_indices(self.lengths, self.batch_size, self.world_size, generator=self.generator)
         return iter(indices)
@@ -209,7 +207,7 @@ class LLaVATrainer(Trainer):
             if getattr(self.args, "use_im_start_end", False):
                 keys_to_match.extend(["embed_tokens", "embed_in"])
 
-            weight_to_save = get_mm_adapter_state_maybe_zero_3(self.model.named_parameters(), keys_to_match)
+            weight_to_save = get_multi_modality_adapter_state_maybe_zero_3(self.model.named_parameters(), keys_to_match)
 
             if self.args.local_rank == 0 or self.args.local_rank == -1:
                 self.model.config.save_pretrained(output_dir)
@@ -228,151 +226,3 @@ class LLaVATrainer(Trainer):
             pass
         else:
             super(Trainer, self)._save(output_dir, state_dict)
-
-
-def get_mm_adapter_state_maybe_zero_3(
-        named_params: List[tuple],
-        keys_to_match: List[str]
-) -> dict:
-    """Extracts and gathers adapter parameters matching specified keys, handling DeepSpeed Zero-3.
-
-    Args:
-        named_params (List[tuple]): List of (name, parameter) tuples.
-        keys_to_match (List[str]): List of key substrings to match parameter names.
-
-    Returns:
-        dict: Dictionary of gathered parameter tensors.
-    """
-    to_return = {k: t for k, t in named_params if any(key_match in k for key_match in keys_to_match)}
-    to_return = {k: maybe_zero_3(v, ignore_status=True, name=k).cpu() for k, v in to_return.items()}
-    return to_return
-
-
-def get_modality_length_grouped_indices(
-        lengths: List[int],
-        batch_size: int,
-        world_size: int,
-        generator: Optional[torch.Generator] = None
-) -> List[int]:
-    """Groups indices by modality and length for batching.
-
-    Args:
-        lengths (List[int]): List of sample lengths (positive for multimodal, negative for language).
-        batch_size (int): Batch size.
-        world_size (int): Number of distributed workers.
-        generator (Optional[torch.Generator], optional): Random generator. Defaults to None.
-
-    Returns:
-        List[int]: Grouped and shuffled indices.
-    """
-    assert all(l != 0 for l in lengths), "Should not have zero length."
-
-    if all(l > 0 for l in lengths) or all(l < 0 for l in lengths):
-        return get_length_grouped_indices(lengths, batch_size, world_size, generator=generator)
-
-    # multi-modal sample.
-    mm_indices, mm_lengths = zip(*[(i, l) for i, l in enumerate(lengths) if l > 0])
-    # language sample.
-    lang_indices, lang_lengths = zip(*[(i, -l) for i, l in enumerate(lengths) if l < 0])
-
-    mm_shuffle = [mm_indices[i] for i in get_length_grouped_indices(mm_lengths, batch_size, world_size, generator=None)]
-    lang_shuffle = [lang_indices[i] for i in get_length_grouped_indices(lang_lengths, batch_size, world_size, generator=None)]
-    megabatch_size = world_size * batch_size
-    mm_mega_batches = [mm_shuffle[i: i + megabatch_size] for i in range(0, len(mm_shuffle), megabatch_size)]
-    lang_mega_batches = [lang_shuffle[i: i + megabatch_size] for i in range(0, len(lang_shuffle), megabatch_size)]
-
-    last_mm = mm_mega_batches[-1]
-    last_lang = lang_mega_batches[-1]
-    additional_batch = last_mm + last_lang
-    mega_batches = mm_mega_batches[:-1] + lang_mega_batches[:-1]
-    megabatch_indices = torch.randperm(len(mega_batches), generator=generator)
-    mega_batches = [mega_batches[i] for i in megabatch_indices]
-
-    if len(additional_batch) > 0:
-        mega_batches.append(sorted(additional_batch))
-
-    return [i for megabatch in mega_batches for i in megabatch]
-
-
-def get_length_grouped_indices(
-        lengths: List[int],
-        batch_size: int,
-        world_size: int,
-        generator: Optional[torch.Generator] = None,
-) -> List[int]:
-    """Groups indices by length for batching.
-
-    Args:
-        lengths (List[int]): List of sample lengths.
-        batch_size (int): Batch size.
-        world_size (int): Number of distributed workers.
-        generator (Optional[torch.Generator], optional): Random generator. Defaults to ``None``.
-
-    Returns:
-        List[int]: Grouped and shuffled indices.
-    """
-    # Shuffle indices based on lengths.
-    indices = torch.randperm(len(lengths), generator=generator)
-    megabatch_size = world_size * batch_size
-    # Split indices into mega_batches.
-    mega_batches = [indices[i: i + megabatch_size].tolist() for i in range(0, len(lengths), megabatch_size)]
-    # Sort each megabatch by length in descending order.
-    mega_batches = [sorted(megabatch, key=lambda i: lengths[i], reverse=True) for megabatch in mega_batches]
-    # If the last megabatch is smaller than the megabatch size, add it to the previous one.
-    mega_batches = [split_to_even_chunks(megabatch, lengths, world_size) for megabatch in mega_batches]
-
-    return [i for megabatch in mega_batches for batch in megabatch for i in batch]
-
-
-def maybe_zero_3(param: torch.nn.Parameter, ignore_status: bool = False, name: Optional[str] = None) -> torch.Tensor:
-    """Safely gathers and clones a parameter, handling DeepSpeed Zero-3 status.
-
-    Args:
-        param (torch.nn.Parameter): The parameter to gather and clone.
-        ignore_status (bool, optional): Whether to ignore NOT_AVAILABLE status. Defaults to False.
-        name (Optional[str], optional): Parameter name for logging. Defaults to None.
-
-    Returns:
-        torch.Tensor: The gathered and cloned parameter tensor.
-    """
-    if hasattr(param, "ds_id"):
-        if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
-            if not ignore_status:
-                print(name, "no ignore status")
-        with zero.GatheredParameters([param]):
-            param = param.data.detach().cpu().clone()
-    else:
-        param = param.detach().cpu().clone()
-    return param
-
-
-def split_to_even_chunks(
-        indices: List[int],
-        lengths: List[int],
-        num_chunks: int
-) -> List[List[int]]:
-    """Splits indices into even chunks based on their lengths.
-
-    Args:
-        indices (List[int]): List of indices to split.
-        lengths (List[int]): List of lengths corresponding to indices.
-        num_chunks (int): Number of chunks to split into.
-
-    Returns:
-        List[List[int]]: List of index chunks.
-    """
-    if len(indices) % num_chunks != 0:
-        return [indices[i::num_chunks] for i in range(num_chunks)]
-
-    num_indices_per_chunk = len(indices) // num_chunks
-
-    chunks = [[] for _ in range(num_chunks)]
-    chunks_lengths = [0 for _ in range(num_chunks)]
-    for index in indices:
-        shortest_chunk = chunks_lengths.index(min(chunks_lengths))
-        chunks[shortest_chunk].append(index)
-        chunks_lengths[shortest_chunk] += lengths[index]
-        if len(chunks[shortest_chunk]) == num_indices_per_chunk:
-            chunks_lengths[shortest_chunk] = float("inf")
-
-    return chunks

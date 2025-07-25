@@ -19,12 +19,15 @@ from typing import Any, List, Tuple, Union, Optional
 
 import torch
 from PIL import Image
+from deepspeed import zero
+from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 
 from llava.constants import IMAGE_TOKEN_INDEX
 
 __all__ = [
-    "divide_to_patches", "expand2square", "load_image_from_base64", "get_anyres_image_grid_shape",
-    "get_model_name_from_path", "process_anyres_image", "process_images", "resize_and_pad_image", "select_best_resolution", "tokenizer_image_token"
+    "divide_to_patches", "expand2square", "load_image_from_base64", "get_anyres_image_grid_shape", "get_length_grouped_indices",
+    "get_model_name_from_path", "get_multi_modality_length_grouped_indices", "get_multi_modality_adapter_state_maybe_zero_3", "maybe_zero_3",
+    "process_anyres_image", "process_images", "resize_and_pad_image", "select_best_resolution", "tokenizer_image_token"
 ]
 
 
@@ -107,6 +110,36 @@ def get_anyres_image_grid_shape(
     return width // patch_size, height // patch_size
 
 
+def get_length_grouped_indices(
+        lengths: List[int],
+        batch_size: int,
+        world_size: int,
+        generator: Optional[torch.Generator] = None,
+) -> List[int]:
+    """Groups indices by length for batching.
+
+    Args:
+        lengths (List[int]): List of sample lengths.
+        batch_size (int): Batch size.
+        world_size (int): Number of distributed workers.
+        generator (Optional[torch.Generator], optional): Random generator. Defaults to ``None``.
+
+    Returns:
+        List[int]: Grouped and shuffled indices.
+    """
+    # Shuffle indices based on lengths.
+    indices = torch.randperm(len(lengths), generator=generator)
+    megabatch_size = world_size * batch_size
+    # Split indices into mega_batches.
+    mega_batches = [indices[i: i + megabatch_size].tolist() for i in range(0, len(lengths), megabatch_size)]
+    # Sort each megabatch by length in descending order.
+    mega_batches = [sorted(megabatch, key=lambda i: lengths[i], reverse=True) for megabatch in mega_batches]
+    # If the last megabatch is smaller than the megabatch size, add it to the previous one.
+    mega_batches = [split_to_even_chunks(megabatch, lengths, world_size) for megabatch in mega_batches]
+
+    return [i for megabatch in mega_batches for batch in megabatch for i in batch]
+
+
 def get_model_name_from_path(model_path: str) -> str:
     """Extracts the model name from a model path.
 
@@ -122,6 +155,94 @@ def get_model_name_from_path(model_path: str) -> str:
         return model_paths[-2] + "_" + model_paths[-1]
     else:
         return model_paths[-1]
+
+
+def get_multi_modality_length_grouped_indices(
+        lengths: List[int],
+        batch_size: int,
+        world_size: int,
+        generator: Optional[torch.Generator] = None
+) -> Union[List[List[Any]], list[int]]:
+    """Groups indices by modality and length for batching.
+
+    Args:
+        lengths (List[int]): List of sample lengths (positive for multimodal, negative for language).
+        batch_size (int): Batch size.
+        world_size (int): Number of distributed workers.
+        generator (Optional[torch.Generator], optional): Random generator. Defaults to None.
+
+    Returns:
+        Union[List[List[Any]], list[int]]: Grouped and shuffled indices.
+    """
+    assert all(l != 0 for l in lengths), "Should not have zero length."
+
+    if all(l > 0 for l in lengths) or all(l < 0 for l in lengths):
+        return get_length_grouped_indices(lengths, batch_size, world_size, generator=generator)
+
+    # multi modality sample.
+    multi_modality_indices, multi_modality_lengths = zip(*[(i, l) for i, l in enumerate(lengths) if l > 0])
+    # language sample.
+    lang_indices, lang_lengths = zip(*[(i, -l) for i, l in enumerate(lengths) if l < 0])
+
+    multi_modality_shuffle = [
+        multi_modality_indices[i] for i in get_length_grouped_indices(multi_modality_lengths, batch_size, world_size, generator=None)
+    ]
+    lang_shuffle = [lang_indices[i] for i in get_length_grouped_indices(lang_lengths, batch_size, world_size, generator=None)]
+    megabatch_size = world_size * batch_size
+    multi_modality_mega_batches = [multi_modality_shuffle[i: i + megabatch_size] for i in range(0, len(multi_modality_shuffle), megabatch_size)]
+    lang_mega_batches = [lang_shuffle[i: i + megabatch_size] for i in range(0, len(lang_shuffle), megabatch_size)]
+
+    last_multi_modality = multi_modality_mega_batches[-1]
+    last_lang = lang_mega_batches[-1]
+    additional_batch = last_multi_modality + last_lang
+    mega_batches = multi_modality_mega_batches[:-1] + lang_mega_batches[:-1]
+    megabatch_indices = torch.randperm(len(mega_batches), generator=generator)
+    mega_batches = [mega_batches[i] for i in megabatch_indices]
+
+    if len(additional_batch) > 0:
+        mega_batches.append(sorted(additional_batch))
+
+    return [i for megabatch in mega_batches for i in megabatch]
+
+
+def get_multi_modality_adapter_state_maybe_zero_3(
+        named_params: List[tuple],
+        keys_to_match: List[str]
+) -> dict:
+    """Extracts and gathers adapter parameters matching specified keys, handling DeepSpeed Zero-3.
+
+    Args:
+        named_params (List[tuple]): List of (name, parameter) tuples.
+        keys_to_match (List[str]): List of key substrings to match parameter names.
+
+    Returns:
+        dict: Dictionary of gathered parameter tensors.
+    """
+    to_return = {k: t for k, t in named_params if any(key_match in k for key_match in keys_to_match)}
+    to_return = {k: maybe_zero_3(v, ignore_status=True, name=k).cpu() for k, v in to_return.items()}
+    return to_return
+
+
+def maybe_zero_3(param: torch.nn.Parameter, ignore_status: bool = False, name: Optional[str] = None) -> torch.Tensor:
+    """Safely gathers and clones a parameter, handling DeepSpeed Zero-3 status.
+
+    Args:
+        param (torch.nn.Parameter): The parameter to gather and clone.
+        ignore_status (bool, optional): Whether to ignore NOT_AVAILABLE status. Defaults to False.
+        name (Optional[str], optional): Parameter name for logging. Defaults to None.
+
+    Returns:
+        torch.Tensor: The gathered and cloned parameter tensor.
+    """
+    if hasattr(param, "ds_id"):
+        if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
+            if not ignore_status:
+                print(name, "no ignore status")
+        with zero.GatheredParameters([param]):
+            param = param.data.detach().cpu().clone()
+    else:
+        param = param.detach().cpu().clone()
+    return param
 
 
 def process_anyres_image(
@@ -258,6 +379,38 @@ def select_best_resolution(
             best_fit = (width, height)
 
     return best_fit
+
+
+def split_to_even_chunks(
+        indices: List[int],
+        lengths: List[int],
+        num_chunks: int
+) -> List[List[int]]:
+    """Splits indices into even chunks based on their lengths.
+
+    Args:
+        indices (List[int]): List of indices to split.
+        lengths (List[int]): List of lengths corresponding to indices.
+        num_chunks (int): Number of chunks to split into.
+
+    Returns:
+        List[List[int]]: List of index chunks.
+    """
+    if len(indices) % num_chunks != 0:
+        return [indices[i::num_chunks] for i in range(num_chunks)]
+
+    num_indices_per_chunk = len(indices) // num_chunks
+
+    chunks = [[] for _ in range(num_chunks)]
+    chunks_lengths = [0 for _ in range(num_chunks)]
+    for index in indices:
+        shortest_chunk = chunks_lengths.index(min(chunks_lengths))
+        chunks[shortest_chunk].append(index)
+        chunks_lengths[shortest_chunk] += lengths[index]
+        if len(chunks[shortest_chunk]) == num_indices_per_chunk:
+            chunks_lengths[shortest_chunk] = float("inf")
+
+    return chunks
 
 
 def tokenizer_image_token(
