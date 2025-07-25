@@ -19,6 +19,8 @@ from typing import Any, Dict, List, Union
 
 from PIL import Image
 
+from llava.utils.ops import expand2square
+
 __all__ = [
     "SeparatorStyle", "Conversation",
     "conv_templates", "conv_vicuna_v0", "conv_vicuna_v1", "conv_llama_2", "conv_llava_llama_2", "conv_mistral_instruct",
@@ -181,19 +183,6 @@ class Conversation:
             Union[str, PIL.Image.Image]: Base64 string if return_pil is False, otherwise PIL image.
         """
         if image_process_mode == "Pad":
-            def expand2square(pil_image, background_color=(122, 116, 104)):
-                width, height = pil_image.size
-                if width == height:
-                    return pil_image
-                elif width > height:
-                    result = Image.new(pil_image.mode, (width, width), background_color)
-                    result.paste(pil_image, (0, (width - height) // 2))
-                    return result
-                else:
-                    result = Image.new(pil_image.mode, (height, height), background_color)
-                    result.paste(pil_image, ((height - width) // 2, 0))
-                    return result
-
             image = expand2square(image)
         elif image_process_mode in ["Default", "Crop"]:
             pass
@@ -329,7 +318,7 @@ conv_vicuna_v1 = Conversation(
 )
 
 conv_llama_2 = Conversation(
-    system="""You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature. If a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don"t know the answer to a question, please don"t share false information.""",
+    system="""You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.   Please ensure that your responses are socially unbiased and positive in nature. If a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don"t know the answer to a question, please don"t share false information.""",
     roles=("USER", "ASSISTANT"),
     version="llama_v2",
     messages=(),

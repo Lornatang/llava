@@ -31,7 +31,7 @@ from llava.engine.trainer import LLaVATrainer
 from llava.models.llm.llama import LlavaLlamaForCausalLM
 from llava.models.llm.mpt import LlavaMptForCausalLM
 from llava.utils.conversation import SeparatorStyle, conv_templates, default_conversation
-from llava.utils.ops import tokenizer_image_token
+from llava.utils.ops import expand2square, tokenizer_image_token
 
 local_rank = None
 
@@ -692,19 +692,6 @@ class LazySupervisedDataset(torch.utils.data.Dataset):
             processor = self.data_args.image_processor
             image = Image.open(Path(image_folder, image_file)).convert("RGB")
             if self.data_args.image_aspect_ratio == "pad":
-                def expand2square(pil_image, background_color):
-                    width, height = pil_image.size
-                    if width == height:
-                        return pil_image
-                    elif width > height:
-                        result = Image.new(pil_image.mode, (width, width), background_color)
-                        result.paste(pil_image, (0, (width - height) // 2))
-                        return result
-                    else:
-                        result = Image.new(pil_image.mode, (height, height), background_color)
-                        result.paste(pil_image, ((height - width) // 2, 0))
-                        return result
-
                 image = expand2square(image, tuple(int(x * 255) for x in processor.image_mean))
                 image = processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
             else:

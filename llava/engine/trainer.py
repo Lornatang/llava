@@ -28,7 +28,7 @@ from transformers.trainer import (
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 
 from llava.utils.events import LOGGER
-from llava.utils.ops import get_length_grouped_indices, get_multi_modality_length_grouped_indices, get_multi_modality_adapter_state_maybe_zero_3
+from llava.utils.ops import get_length_grouped_indices, get_mm_length_grouped_indices, get_mm_adapter_state_maybe_zero_3
 
 __all__ = [
     "LengthGroupedSampler", "LLaVATrainer",
@@ -73,14 +73,14 @@ class LengthGroupedSampler(Sampler):
         """
         return len(self.lengths)
 
-    def __iter__(self) -> Iterator[int]:
+    def __iter__(self) -> Iterator[List[Any]]:
         """Yields indices for sampling.
 
         Returns:
-            Iterator[int]: Iterator over sample indices.
+            Iterator[List[Any]]: Iterator over sample indices.
         """
         if self.group_by_modality:
-            indices = get_multi_modality_length_grouped_indices(self.lengths, self.batch_size, self.world_size, generator=self.generator)
+            indices = get_mm_length_grouped_indices(self.lengths, self.batch_size, self.world_size, generator=self.generator)
         else:
             indices = get_length_grouped_indices(self.lengths, self.batch_size, self.world_size, generator=self.generator)
         return iter(indices)
@@ -207,7 +207,7 @@ class LLaVATrainer(Trainer):
             if getattr(self.args, "use_im_start_end", False):
                 keys_to_match.extend(["embed_tokens", "embed_in"])
 
-            weight_to_save = get_multi_modality_adapter_state_maybe_zero_3(self.model.named_parameters(), keys_to_match)
+            weight_to_save = get_mm_adapter_state_maybe_zero_3(self.model.named_parameters(), keys_to_match)
 
             if self.args.local_rank == 0 or self.args.local_rank == -1:
                 self.model.config.save_pretrained(output_dir)

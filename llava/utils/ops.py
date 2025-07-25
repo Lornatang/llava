@@ -26,7 +26,7 @@ from llava.constants import IMAGE_TOKEN_INDEX
 
 __all__ = [
     "divide_to_patches", "expand2square", "load_image_from_base64", "get_anyres_image_grid_shape", "get_length_grouped_indices",
-    "get_model_name_from_path", "get_multi_modality_length_grouped_indices", "get_multi_modality_adapter_state_maybe_zero_3", "maybe_zero_3",
+    "get_model_name_from_path", "get_mm_length_grouped_indices", "get_mm_adapter_state_maybe_zero_3", "maybe_zero_3",
     "process_anyres_image", "process_images", "resize_and_pad_image", "select_best_resolution", "tokenizer_image_token"
 ]
 
@@ -157,7 +157,7 @@ def get_model_name_from_path(model_path: str) -> str:
         return model_paths[-1]
 
 
-def get_multi_modality_length_grouped_indices(
+def get_mm_length_grouped_indices(
         lengths: List[int],
         batch_size: int,
         world_size: int,
@@ -180,22 +180,20 @@ def get_multi_modality_length_grouped_indices(
         return get_length_grouped_indices(lengths, batch_size, world_size, generator=generator)
 
     # multi modality sample.
-    multi_modality_indices, multi_modality_lengths = zip(*[(i, l) for i, l in enumerate(lengths) if l > 0])
+    mm_indices, mm_lengths = zip(*[(i, l) for i, l in enumerate(lengths) if l > 0])
     # language sample.
     lang_indices, lang_lengths = zip(*[(i, -l) for i, l in enumerate(lengths) if l < 0])
 
-    multi_modality_shuffle = [
-        multi_modality_indices[i] for i in get_length_grouped_indices(multi_modality_lengths, batch_size, world_size, generator=None)
-    ]
+    mm_shuffle = [mm_indices[i] for i in get_length_grouped_indices(mm_lengths, batch_size, world_size, generator=None)]
     lang_shuffle = [lang_indices[i] for i in get_length_grouped_indices(lang_lengths, batch_size, world_size, generator=None)]
     megabatch_size = world_size * batch_size
-    multi_modality_mega_batches = [multi_modality_shuffle[i: i + megabatch_size] for i in range(0, len(multi_modality_shuffle), megabatch_size)]
+    mm_mega_batches = [mm_shuffle[i: i + megabatch_size] for i in range(0, len(mm_shuffle), megabatch_size)]
     lang_mega_batches = [lang_shuffle[i: i + megabatch_size] for i in range(0, len(lang_shuffle), megabatch_size)]
 
-    last_multi_modality = multi_modality_mega_batches[-1]
+    last_mm = mm_mega_batches[-1]
     last_lang = lang_mega_batches[-1]
-    additional_batch = last_multi_modality + last_lang
-    mega_batches = multi_modality_mega_batches[:-1] + lang_mega_batches[:-1]
+    additional_batch = last_mm + last_lang
+    mega_batches = mm_mega_batches[:-1] + lang_mega_batches[:-1]
     megabatch_indices = torch.randperm(len(mega_batches), generator=generator)
     mega_batches = [mega_batches[i] for i in megabatch_indices]
 
@@ -205,7 +203,7 @@ def get_multi_modality_length_grouped_indices(
     return [i for megabatch in mega_batches for i in megabatch]
 
 
-def get_multi_modality_adapter_state_maybe_zero_3(
+def get_mm_adapter_state_maybe_zero_3(
         named_params: List[tuple],
         keys_to_match: List[str]
 ) -> dict:
@@ -270,8 +268,7 @@ def process_anyres_image(
     patches = divide_to_patches(image_padded, processor.crop_size["height"])
     image_original_resize = image.resize((processor.size["shortest_edge"], processor.size["shortest_edge"]))
     image_patches = [image_original_resize] + patches
-    image_patches = [processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0]
-                     for image_patch in image_patches]
+    image_patches = [processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in image_patches]
     return torch.stack(image_patches, dim=0)
 
 
