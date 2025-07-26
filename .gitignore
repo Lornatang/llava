@@ -26,6 +26,7 @@ wheels/
 _darcs/
 
 # develop formats
+*.logs
 *.pth
 *.pkl
 *.npy
