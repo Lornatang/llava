@@ -10,20 +10,20 @@ deepspeed ./tools/train.py \
     --mm_vision_select_layer -2 \
     --mm_use_im_start_end False \
     --mm_use_im_patch_token False \
-    --bf16 True \
     --output_dir ./results/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-pretrain-blip_laion_cc_sbu_558k \
     --num_train_epochs 1 \
     --per_device_train_batch_size 32 \
     --per_device_eval_batch_size 4 \
     --gradient_accumulation_steps 1 \
     --save_strategy "steps" \
-    --save_steps 24000 \
+    --save_steps 1000 \
     --save_total_limit 1 \
     --learning_rate 1e-3 \
     --weight_decay 0. \
     --warmup_ratio 0.03 \
     --lr_scheduler_type "cosine" \
     --logging_steps 1 \
+    --bf16 True \
     --tf32 False \
     --model_max_length 2048 \
     --gradient_checkpointing True \

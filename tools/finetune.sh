@@ -12,24 +12,23 @@ deepspeed ./tools/train.py \
     --mm_use_im_patch_token False \
     --image_aspect_ratio pad \
     --group_by_modality_length True \
-    --bf16 True \
     --output_dir ./results/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-finetune-llava_v1_5_mix665k \
     --num_train_epochs 1 \
     --per_device_train_batch_size 16 \
     --per_device_eval_batch_size 4 \
     --gradient_accumulation_steps 1 \
     --save_strategy "steps" \
-    --save_steps 50000 \
+    --save_steps 1000 \
     --save_total_limit 1 \
     --learning_rate 2e-5 \
     --weight_decay 0. \
     --warmup_ratio 0.03 \
     --lr_scheduler_type "cosine" \
     --logging_steps 1 \
+    --bf16 True \
     --tf32 True \
     --model_max_length 2048 \
     --gradient_checkpointing True \
     --dataloader_num_workers 4 \
     --lazy_preprocess True \
-    --report_to wandbrue \
     --report_to wandb
