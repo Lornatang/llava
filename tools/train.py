@@ -25,6 +25,7 @@ from PIL import Image
 from deepspeed import zero
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 from peft.tuners.lora import LoraLayer
+from torch import nn
 
 from llava.constants import IGNORE_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.engine.trainer import LLaVATrainer
@@ -126,6 +127,7 @@ def get_peft_state_maybe_zero_3(named_params, bias):
         to_return = {}
         maybe_lora_bias = {}
         lora_bias_names = set()
+        bias_name = None
         for k, t in named_params:
             if "lora_" in k:
                 to_return[k] = t
@@ -297,7 +299,7 @@ def _add_speaker_and_signal(header, source, get_conversation=True):
 
 
 def preprocess_multimodal(
-        sources: Sequence[str],
+        sources: Dict,
         data_args: DataArguments
 ) -> Dict:
     is_multimodal = data_args.is_multimodal
@@ -577,9 +579,15 @@ def preprocess_mpt(
 
 
 def preprocess_plain(
-        sources: Sequence[str],
+        sources: Dict,
         tokenizer: transformers.PreTrainedTokenizer,
 ) -> Dict:
+    """Preprocess conversations in plain style.
+
+    Args:
+        sources (Dict): A list of conversations, each conversation is a list of sentences.
+        tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use for tokenization.
+    """
     # add end signal and concatenate together
     conversations = []
     for source in sources:
@@ -599,16 +607,16 @@ def preprocess_plain(
 
 
 def preprocess(
-        sources: Sequence[str],
+        sources: Dict,
         tokenizer: transformers.PreTrainedTokenizer,
         has_image: bool = False
 ) -> Dict:
-    """
-    Given a list of sources, each is a conversation list. This transform:
-    1. Add signal "### " at the beginning each sentence, with end signal "\n";
-    2. Concatenate conversations together;
-    3. Tokenize the concatenated conversation;
-    4. Make a deepcopy as the target. Mask human words with IGNORE_INDEX.
+    """Preprocess conversations for supervised fine-tuning.
+
+    Args:
+        sources (Dict): A list of conversations, each conversation is a list of sentences.
+        tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use for tokenization.
+        has_image (bool): Whether the conversations contain images.
     """
     if default_conversation.sep_style == SeparatorStyle.PLAIN:
         return preprocess_plain(sources, tokenizer)
@@ -620,6 +628,7 @@ def preprocess(
         return preprocess_mpt(sources, tokenizer, has_image=has_image)
     # add end signal and concatenate together
     conversations = []
+    header = None
     for source in sources:
         header = f"{default_conversation.system}\n\n"
         conversation = _add_speaker_and_signal(header, source)
@@ -686,6 +695,7 @@ class LazySupervisedDataset(torch.utils.data.Dataset):
         if isinstance(i, int):
             sources = [sources]
         assert len(sources) == 1, "Don't know why it is wrapped to a list"
+        image = None
         if "image" in sources[0]:
             image_file = self.list_data_dict[i]["image"]
             image_folder = self.data_args.image_folder
@@ -706,14 +716,13 @@ class LazySupervisedDataset(torch.utils.data.Dataset):
             self.tokenizer,
             has_image=("image" in self.list_data_dict[i]))
         if isinstance(i, int):
-            data_dict = dict(input_ids=data_dict["input_ids"][0],
-                             labels=data_dict["labels"][0])
+            data_dict = dict(input_ids=data_dict["input_ids"][0], labels=data_dict["labels"][0])
 
-        # image exist in the data
+        # Image exists in the data.
         if "image" in self.list_data_dict[i]:
             data_dict["image"] = image
         elif self.data_args.is_multimodal:
-            # image does not exist in the data, but the model is multimodal
+            # The image does not exist in the data, but the model is multimodal
             crop_size = self.data_args.image_processor.crop_size
             data_dict["image"] = torch.zeros(3, crop_size["height"], crop_size["width"])
         return data_dict
@@ -949,6 +958,7 @@ def train(attn_implementation=None):
         trainer.train(resume_from_checkpoint=True)
     else:
         trainer.train()
+
     trainer.save_state()
 
     model.config.use_cache = True
