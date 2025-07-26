@@ -5,14 +5,14 @@ deepspeed ./tools/train.py \
     --data_path ./datasets/llava_finetune/llava_v1_5_mix665k.json \
     --image_folder ./datasets/llava_finetune \
     --vision_tower ./results/pretrained_models/openai/clip-vit-large-patch14-336 \
-    --pretrain_mm_mlp_adapter ./results/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-pretrain-blip_laion_cc_sbu_558k/mm_projector.bin \
+    --pretrain_mm_mlp_adapter ./results/pretrain/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-blip_laion_cc_sbu_558k/mm_projector.bin \
     --mm_projector_type mlp2x_gelu \
     --mm_vision_select_layer -2 \
     --mm_use_im_start_end False \
     --mm_use_im_patch_token False \
     --image_aspect_ratio pad \
     --group_by_modality_length True \
-    --output_dir ./results/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-finetune-llava_v1_5_mix665k \
+    --output_dir ./results/finetune/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-llava_v1_5_mix665k \
     --num_train_epochs 1 \
     --per_device_train_batch_size 16 \
     --per_device_eval_batch_size 4 \

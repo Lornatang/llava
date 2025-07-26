@@ -10,7 +10,7 @@ deepspeed ./tools/train.py \
     --mm_vision_select_layer -2 \
     --mm_use_im_start_end False \
     --mm_use_im_patch_token False \
-    --output_dir ./results/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-pretrain-blip_laion_cc_sbu_558k \
+    --output_dir ./results/pretrain/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-blip_laion_cc_sbu_558k \
     --num_train_epochs 1 \
     --per_device_train_batch_size 32 \
     --per_device_eval_batch_size 4 \
