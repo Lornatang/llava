@@ -188,13 +188,12 @@ class LLaVATrainer(Trainer):
 
         return self.optimizer
 
-    def _save_checkpoint(self, model: nn.Module, trial: Any, metrics: Optional[dict] = None) -> None:
+    def _save_checkpoint(self, model: nn.Module, trial: Any) -> None:
         """Saves a checkpoint during training.
 
         Args:
             model (nn.Module): The model being trained.
             trial (Any): Hyperparameter search trial object.
-            metrics (Optional[dict], optional): Training metrics. Defaults to None.
         """
         if getattr(self.args, "tune_mm_mlp_adapter", False):
             checkpoint_folder = f"{PREFIX_CHECKPOINT_DIR}-{self.state.global_step}"
@@ -213,7 +212,7 @@ class LLaVATrainer(Trainer):
                 self.model.config.save_pretrained(output_dir)
                 torch.save(weight_to_save, str(Path(output_dir, f"mm_projector.bin")))
         else:
-            super(Trainer, self)._save_checkpoint(model, trial, metrics)
+            super(LLaVATrainer, self)._save_checkpoint(model, trial)
 
     def _save(self, output_dir: Optional[str] = None, state_dict: Optional[dict] = None) -> None:
         """Saves the model and state dict.
@@ -225,4 +224,4 @@ class LLaVATrainer(Trainer):
         if getattr(self.args, "tune_mm_mlp_adapter", False):
             pass
         else:
-            super(Trainer, self)._save(output_dir, state_dict)
+            super(LLaVATrainer, self)._save(output_dir, state_dict)
