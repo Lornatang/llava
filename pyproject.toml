@@ -31,14 +31,15 @@ classifiers = [
 # Required dependencies
 dependencies = [
     "deepspeed",
+    "flash-attn==2.8.0",
     "peft",
     "pillow",
     "pi-heif",
     "timm",
-    "torch>=2.5.1",
-    "torchvision>=0.20.1",
-    "tokenizers>=0.21.0",
-    "transformers>=4.37.2",
+    "torch>=2.7.1",
+    "torchvision>=0.22.1",
+    "tokenizers",
+    "transformers",
     "wandb",
 ]
 
