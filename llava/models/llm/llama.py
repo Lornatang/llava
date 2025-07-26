@@ -34,23 +34,27 @@ class LlavaLlamaModel(LlavaMetaModel, LlamaModel):
     config_class = LlavaConfig
 
     def __init__(self, config: LlamaConfig):
-        super().__init__(config)
+        super().__init__(
+            config=config,
+        )
 
 
 class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
     config_class = LlavaConfig
 
-    def __init__(self, config):
-        super().__init__(config)
-        self.model = LlavaLlamaModel(config)
-        self.pretraining_tp = config.pretraining_tp
-        self.vocab_size = config.vocab_size
-        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+    def __init__(self, config: LlamaConfig):
+        super().__init__(
+            config=config,
+        )
+        self.model: LlavaLlamaModel = LlavaLlamaModel(config)
+        self.pretraining_tp: int = config.pretraining_tp
+        self.vocab_size: int = config.vocab_size
+        self.lm_head: nn.Linear = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
         # Initialize weights and apply final processing
         self.post_init()
 
-    def get_model(self):
+    def get_model(self) -> LlavaLlamaModel:
         return self.model
 
     def forward(
