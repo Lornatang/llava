@@ -12,4 +12,4 @@
 # limitations under the License.
 # ==============================================================================
 from .builder import build_vision_tower
-from .clip_encoder import CLIPVisionTower, CLIPVisionTowerS2
+from .clip_encoder import CLIPVisionTower

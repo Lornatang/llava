@@ -14,7 +14,7 @@
 from pathlib import Path
 from typing import Dict
 
-from .clip_encoder import CLIPVisionTower, CLIPVisionTowerS2
+from .clip_encoder import CLIPVisionTower
 
 __all__ = [
     "build_vision_tower",
@@ -40,9 +40,6 @@ def build_vision_tower(vision_tower_cfg: Dict, **kwargs) -> CLIPVisionTower:
         vision_tower.startswith("laion"),
         "ShareGPT4V" in vision_tower
     ]):
-        if getattr(vision_tower_cfg, "s2", False):
-            return CLIPVisionTowerS2(vision_tower, args=vision_tower_cfg, **kwargs)
-        else:
-            return CLIPVisionTower(vision_tower, args=vision_tower_cfg, **kwargs)
+        return CLIPVisionTower(vision_tower, args=vision_tower_cfg, **kwargs)
 
     raise ValueError(f"Unknown vision tower: {vision_tower}")
