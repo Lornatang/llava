@@ -16,19 +16,18 @@ from typing import Any, Iterator, List, Optional
 
 import bitsandbytes
 import torch
+from llava.utils.events import LOGGER
+from llava.utils.ops import get_length_grouped_indices, get_mm_length_grouped_indices, get_mm_adapter_state_maybe_zero_3
 from torch import nn
 from torch.utils.data import Sampler
 from transformers import Trainer
+from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
 from transformers.trainer import (
     is_sagemaker_mp_enabled,
     get_parameter_names,
     has_length,
-    ALL_LAYERNORM_LAYERS,
 )
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
-
-from llava.utils.events import LOGGER
-from llava.utils.ops import get_length_grouped_indices, get_mm_length_grouped_indices, get_mm_adapter_state_maybe_zero_3
 
 __all__ = [
     "LengthGroupedSampler", "LLaVATrainer",
@@ -89,7 +88,7 @@ class LengthGroupedSampler(Sampler):
 class LLaVATrainer(Trainer):
     """LLaVATrainer class for LLaVA models, extending the base Trainer with custom functionality."""
 
-    def _get_train_sampler(self) -> Optional[torch.utils.data.Sampler]:
+    def _get_train_sampler(self, datasets: Any = None) -> Optional[torch.utils.data.Sampler]:
         """Returns the training sampler, optionally grouping by modality length.
 
         Returns:
