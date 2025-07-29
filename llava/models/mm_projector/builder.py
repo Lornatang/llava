@@ -14,6 +14,7 @@
 import re
 from typing import Any, Dict
 
+import torch
 from torch import nn
 
 __all__ = [
