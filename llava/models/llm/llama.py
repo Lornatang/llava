@@ -11,7 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-from typing import List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import nn
@@ -27,22 +27,35 @@ __all__ = [
 
 
 class LlavaConfig(LlamaConfig):
-    model_type = "llava_llama"
+    """Configuration class for Llava Llama model."""
+    model_type: str = "llava_llama"
 
 
 class LlavaLlamaModel(LlavaMetaModel, LlamaModel):
-    config_class = LlavaConfig
+    """Llava Llama model class."""
+    config_class: LlavaConfig = LlavaConfig
 
-    def __init__(self, config: LlamaConfig):
+    def __init__(self, config: LlamaConfig) -> None:
+        """Initialize the Llava Llama model.
+
+        Args:
+            config (LlamaConfig): Configuration for the Llava Llama model.
+        """
         super().__init__(
             config=config,
         )
 
 
 class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
-    config_class = LlavaConfig
+    """Llava Llama model for causal language modeling."""
+    config_class: LlavaConfig = LlavaConfig
 
-    def __init__(self, config: LlamaConfig):
+    def __init__(self, config: LlamaConfig) -> None:
+        """Initialize the Llava Llama model for causal language modeling.
+
+        Args:
+            config (LlamaConfig): Configuration for the Llava Llama model.
+        """
         super().__init__(
             config=config,
         )
@@ -51,10 +64,11 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         self.vocab_size: int = config.vocab_size
         self.lm_head: nn.Linear = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
-        # Initialize weights and apply final processing
+        # Initialize weights and apply final processing.
         self.post_init()
 
     def get_model(self) -> LlavaLlamaModel:
+        """Get the underlying Llava Llama model."""
         return self.model
 
     def forward(
@@ -73,7 +87,26 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             image_sizes: Optional[List[List[int]]] = None,
             return_dict: Optional[bool] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
+        """Forward pass for the Llava Llama model.
 
+        Args:
+            input_ids (torch.LongTensor, optional): Input token IDs. Defaults to ``None``.
+            attention_mask (torch.Tensor, optional): Attention mask. Defaults to ``None``.
+            position_ids (torch.LongTensor, optional): Position IDs. Defaults to ``None``.
+            past_key_values (List[torch.FloatTensor], optional): Past key values for caching. Defaults to ``None``.
+            inputs_embeds (torch.FloatTensor, optional): Input embeddings. Defaults to ``None``.
+            cache_position (torch.LongTensor, optional): Cache position for the model. Defaults to ``None``.
+            use_cache (bool, optional): Whether to use cache. Defaults to ``None``.
+            labels (torch.LongTensor, optional): Labels for the model. Defaults to ``None``.
+            output_attentions (bool, optional): Whether to output attentions. Defaults to ``None``.
+            output_hidden_states (bool, optional): Whether to output hidden states. Defaults to ``None``.
+            images (torch.FloatTensor, optional): Input images for multimodal processing. Defaults to ``None``.
+            image_sizes (List[List[int]], optional): Sizes of the input images. Defaults to ``None``.
+            return_dict (bool, optional): Whether to return a dictionary of outputs. Defaults to ``None``.
+
+        Returns:
+            Union[Tuple, CausalLMOutputWithPast]: Model outputs, either as a tuple or a CausalLMOutputWithPast object.
+        """
         if inputs_embeds is None:
             (
                 input_ids,
@@ -98,12 +131,41 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             position_ids=position_ids,
             past_key_values=past_key_values,
             inputs_embeds=inputs_embeds,
-            labels=labels,
             use_cache=use_cache,
+            labels=labels,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict
         )
+
+    def prepare_inputs_for_generation(
+            self,
+            input_ids: torch.LongTensor,
+            past_key_values: Optional[List[torch.FloatTensor]] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            **kwargs
+    ) -> Dict:
+        """Prepares inputs for generation, supporting multimodal information.
+
+        Args:
+            input_ids (torch.LongTensor): Input token IDs.
+            past_key_values (Optional[List[torch.FloatTensor]], optional): Cached past key values. Defaults to ``None``.
+            inputs_embeds (Optional[torch.FloatTensor], optional): Input embeddings. Defaults to ``None``.
+            **kwargs: Additional keyword arguments, may include 'images' (image features) and 'image_sizes' (image sizes).
+
+        Returns:
+            Dict: Dictionary containing all required inputs for generation, including multimodal information if provided.
+        """
+        images = kwargs.pop("images", None)
+        image_sizes = kwargs.pop("image_sizes", None)
+        inputs = super().prepare_inputs_for_generation(input_ids, past_key_values=past_key_values, inputs_embeds=inputs_embeds, **kwargs)
+
+        if images is not None:
+            inputs["images"] = images
+
+        if image_sizes is not None:
+            inputs["image_sizes"] = image_sizes
+        return inputs
 
     @torch.no_grad()
     def generate(
@@ -113,8 +175,20 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             image_sizes: Optional[torch.Tensor] = None,
             **kwargs,
     ) -> Union[GenerateOutput, torch.LongTensor]:
+        """Generate sequences from the Llava Llama model.
+
+        Args:
+            inputs (torch.Tensor, optional): Input token IDs. Defaults to ``None``.
+            images (torch.Tensor, optional): Input images for multimodal generation. Defaults to ``None``.
+            image_sizes (torch.Tensor, optional): Sizes of the input images. Defaults to ``None``.
+            **kwargs: Additional keyword arguments for generation.
+
+        Returns:
+            Union[GenerateOutput, torch.LongTensor]: Generated sequences or generation output.
+        """
         position_ids = kwargs.pop("position_ids", None)
         attention_mask = kwargs.pop("attention_mask", None)
+
         if "inputs_embeds" in kwargs:
             raise NotImplementedError("`inputs_embeds` is not supported")
 
@@ -130,9 +204,9 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 inputs,
                 position_ids,
                 attention_mask,
-                None,
-                None,
-                images,
+                past_key_values=None,
+                labels=None,
+                images=images,
                 image_sizes=image_sizes
             )
         else:
@@ -144,15 +218,3 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             inputs_embeds=inputs_embeds,
             **kwargs
         )
-
-    def prepare_inputs_for_generation(self, input_ids, past_key_values=None, inputs_embeds=None, **kwargs):
-        images = kwargs.pop("images", None)
-        image_sizes = kwargs.pop("image_sizes", None)
-        inputs = super().prepare_inputs_for_generation(
-            input_ids, past_key_values=past_key_values, inputs_embeds=inputs_embeds, **kwargs
-        )
-        if images is not None:
-            inputs['images'] = images
-        if image_sizes is not None:
-            inputs['image_sizes'] = image_sizes
-        return inputs
