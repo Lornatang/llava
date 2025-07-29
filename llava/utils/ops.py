@@ -21,13 +21,12 @@ import torch
 from PIL import Image
 from deepspeed import zero
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
-
 from llava.constants import IMAGE_TOKEN_INDEX
 
 __all__ = [
     "divide_to_patches", "expand2square", "load_image_from_base64", "get_anyres_image_grid_shape", "get_length_grouped_indices",
     "get_model_name_from_path", "get_mm_length_grouped_indices", "get_mm_adapter_state_maybe_zero_3", "maybe_zero_3",
-    "process_anyres_image", "process_images", "resize_and_pad_image", "select_best_resolution", "tokenizer_image_token"
+    "process_anyres_image", "process_images", "resize_and_pad_image", "select_best_resolution", "tokenizer_image_token", "unpad_image",
 ]
 
 
@@ -446,3 +445,33 @@ def tokenizer_image_token(
             return torch.tensor(input_ids, dtype=torch.long)
         raise ValueError(f"Unsupported tensor type: {return_tensors}")
     return input_ids
+
+
+def unpad_image(x: torch.Tensor, original_size: Tuple[int, int]) -> torch.Tensor:
+    """Remove padding from an image tensor to restore its original size.
+
+    Args:
+        x (torch.Tensor): The padded image tensor.
+        original_size (Tuple[int, int]): The original width and height.
+
+    Returns:
+        torch.Tensor: The unpadded image tensor.
+    """
+    original_width, original_height = original_size
+    current_height, current_width = x.shape[1:]
+
+    original_aspect_ratio = original_width / original_height
+    current_aspect_ratio = current_width / current_height
+
+    if original_aspect_ratio > current_aspect_ratio:
+        scale_factor = current_width / original_width
+        new_height = int(original_height * scale_factor)
+        padding = (current_height - new_height) // 2
+        unpadded_tensor = x[:, padding:current_height - padding, :]
+    else:
+        scale_factor = current_height / original_height
+        new_width = int(original_width * scale_factor)
+        padding = (current_width - new_width) // 2
+        unpadded_tensor = x[:, :, padding:current_width - padding]
+
+    return unpadded_tensor
