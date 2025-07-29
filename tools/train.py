@@ -30,7 +30,6 @@ from torch import nn
 from llava.constants import IGNORE_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.engine.trainer import LLaVATrainer
 from llava.models.llm.llama import LlavaLlamaForCausalLM
-from llava.models.llm.mpt import LlavaMptForCausalLM
 from llava.utils.conversation import SeparatorStyle, conv_templates, default_conversation
 from llava.utils.ops import expand2square, tokenizer_image_token
 
@@ -802,25 +801,14 @@ def train(attn_implementation=None):
         ))
 
     if model_args.vision_tower is not None:
-        if "mpt" in model_args.model_name_or_path:
-            config = transformers.AutoConfig.from_pretrained(model_args.model_name_or_path, trust_remote_code=True)
-            config.attn_config["attn_impl"] = training_args.mpt_attn_impl
-            model = LlavaMptForCausalLM.from_pretrained(
-                model_args.model_name_or_path,
-                config=config,
-                cache_dir=training_args.cache_dir,
-                local_files_only=True,
-                **bnb_model_from_pretrained_args
-            )
-        else:
-            model = LlavaLlamaForCausalLM.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                local_files_only=True,
-                attn_implementation=attn_implementation,
-                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                **bnb_model_from_pretrained_args
-            )
+        model = LlavaLlamaForCausalLM.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            local_files_only=True,
+            attn_implementation=attn_implementation,
+            torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+            **bnb_model_from_pretrained_args
+        )
     else:
         model = transformers.LlamaForCausalLM.from_pretrained(
             model_args.model_name_or_path,

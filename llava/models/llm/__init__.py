@@ -12,4 +12,3 @@
 # limitations under the License.
 # ==============================================================================
 from .llama import LlavaConfig, LlavaLlamaModel, LlavaLlamaForCausalLM
-from .mpt import LlavaMptConfig, LlavaMptModel, LlavaMptForCausalLM
