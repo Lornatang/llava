@@ -153,7 +153,7 @@ class LLaVATrainer(Trainer):
                         "lr": self.args.mm_projector_lr,
                     },
                 ]
-            else:
+            else:  # Run this.
                 optimizer_grouped_parameters = [
                     {
                         "params": [
@@ -180,12 +180,18 @@ class LLaVATrainer(Trainer):
                 for module in self.model.modules():
                     if isinstance(module, nn.Embedding):
                         skipped += sum({p.data_ptr(): p.numel() for p in module.parameters()}.values())
-                        LOGGER.info(f"skipped {module}: {skipped / 2 ** 20}M params")
+                        LOGGER.info(f"skipped {module}: {skipped / 2 ** 20}M params.")
                         manager.register_module_override(module, "weight", {"optim_bits": 32})
-                        LOGGER.debug(f"bitsandbytes: will optimize {module} in fp32")
-                LOGGER.info(f"skipped: {skipped / 2 ** 20}M params")
+                        LOGGER.debug(f"bitsandbytes: will optimize {module} in fp32.")
+                LOGGER.info(f"skipped: {skipped / 2 ** 20}M params.")
 
         return self.optimizer
+
+    def _get_adapter_keys(self):
+        keys = ["mm_projector", "vision_resampler"]
+        if getattr(self.args, "use_im_start_end", False):
+            keys.extend(["embed_tokens", "embed_in"])
+        return keys
 
     def _save_checkpoint(self, model: nn.Module, trial: Any) -> None:
         """Saves a checkpoint during training.
@@ -194,23 +200,18 @@ class LLaVATrainer(Trainer):
             model (nn.Module): The model being trained.
             trial (Any): Hyperparameter search trial object.
         """
-        if getattr(self.args, "tune_mm_mlp_adapter", False):
-            checkpoint_folder = f"{PREFIX_CHECKPOINT_DIR}-{self.state.global_step}"
+        if getattr(self.args, "tune_mm_mlp_adapter", False):  # finetune.
+            if self.args.local_rank in (0, -1):
+                run_dir = self._get_output_dir(trial=trial)
+                checkpoint_dir = f"{PREFIX_CHECKPOINT_DIR}-{self.state.global_step}"
+                output_dir = Path(run_dir, checkpoint_dir)
+                self.model.config.save_pretrained(str(output_dir))
 
-            run_dir = self._get_output_dir(trial=trial)
-            output_dir = str(Path(run_dir, checkpoint_folder))
-
-            # Only save Adapter.
-            keys_to_match = ["mm_projector", "vision_resampler"]
-            if getattr(self.args, "use_im_start_end", False):
-                keys_to_match.extend(["embed_tokens", "embed_in"])
-
-            weight_to_save = get_mm_adapter_state_maybe_zero_3(self.model.named_parameters(), keys_to_match)
-
-            if self.args.local_rank == 0 or self.args.local_rank == -1:
-                self.model.config.save_pretrained(output_dir)
-                torch.save(weight_to_save, str(Path(output_dir, f"mm_projector.bin")))
-        else:
+                # Only save Adapter.
+                keys_to_match = self._get_adapter_keys()
+                mm_adapter_state = get_mm_adapter_state_maybe_zero_3(self.model.named_parameters(), keys_to_match)
+                torch.save(mm_adapter_state, Path(output_dir, "mm_projector.bin"))
+        else: # pretrain.
             super(LLaVATrainer, self)._save_checkpoint(model, trial)
 
     def _save(self, output_dir: Optional[str] = None, state_dict: Optional[dict] = None) -> None:
@@ -220,7 +221,8 @@ class LLaVATrainer(Trainer):
             output_dir (Optional[str], optional): Directory to save to. Defaults to None.
             state_dict (Optional[dict], optional): State dictionary to save. Defaults to None.
         """
-        if getattr(self.args, "tune_mm_mlp_adapter", False):
-            pass
-        else:
-            super(LLaVATrainer, self)._save(output_dir, state_dict)
+        if getattr(self.args, "tune_mm_mlp_adapter", False):  # finetune.
+            return
+
+        # pretrain.
+        super(LLaVATrainer, self)._save(output_dir, state_dict)
