@@ -627,7 +627,7 @@ def preprocess(
     conversations = []
     header = None
     for source in sources:
-        header = f"{default_conversation.system_template}\n\n"
+        header = f"{default_conversation.system_message}\n\n"
         conversation = _add_speaker_and_signal(header, source)
         conversations.append(conversation)
 

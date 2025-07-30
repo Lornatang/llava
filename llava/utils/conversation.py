@@ -15,15 +15,15 @@ import base64
 import dataclasses
 from enum import auto, Enum
 from io import BytesIO
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Tuple, Union
 
 from PIL import Image
 from llava.utils.ops import convert_expand_to_square
 
 __all__ = [
     "SeparatorStyle", "Conversation",
-    "conv_llava_plain", "conv_llava_vicuna_v1", "conv_llava_vicuna_v1_mmtag", "conv_llava_llama_2", "conv_vicuna_v1", "conv_llama_2",
-    "conv_templates", "default_conversation",
+    "conv_llava_plain", "conv_llava_vicuna_v1", "conv_llava_vicuna_v1_mmtag", "conv_llava_llama_2", "conv_llava_deepseek", "conv_vicuna_v1",
+    "conv_llama_2", "conv_deepseek", "conv_templates", "default_conversation",
 ]
 
 
@@ -32,12 +32,13 @@ class SeparatorStyle(Enum):
     PLAIN = auto()  # Text style.
     VICUNA_V1 = auto()  # Vicuna v1 style.
     LLAMA_2 = auto()  # Llama 2 style.
+    DEEPSEEK = auto()  # DeepSeek-V3/R1 style.
 
 
 @dataclasses.dataclass
 class Conversation:
     """Class representing a conversation with a system prompt, roles, and messages."""
-    system_template: str = "{system_message}"
+    system_message: str = ""
     roles: Tuple[str] = ("USER", "ASSISTANT")
     messages: List[List[str]] = ()
     offset: int = 0
@@ -77,7 +78,7 @@ class Conversation:
 
         if self.sep_style == SeparatorStyle.PLAIN:  # Text style.
             seps = [self.sep, self.sep2]
-            ret = self.system_template
+            ret = self.system_message
             for i, (role, message) in enumerate(messages):
                 if message:
                     if type(message) is tuple:
@@ -87,7 +88,7 @@ class Conversation:
                     ret += ""
         elif self.sep_style == SeparatorStyle.VICUNA_V1:  # Vicuna v1 style.
             seps = [self.sep, self.sep2]
-            ret = self.system_template + seps[0]
+            ret = self.system_message + seps[0]
             for i, (role, message) in enumerate(messages):
                 if message:
                     if type(message) is tuple:
@@ -107,7 +108,7 @@ class Conversation:
                 if message:
                     if type(message) is tuple:
                         message, _, _ = message
-                    if i == 0: message = wrap_sys(self.system_template) + message
+                    if i == 0: message = wrap_sys(self.system_message) + message
                     if i % 2 == 0:
                         message = wrap_inst(message)
                         ret += self.sep + message
@@ -116,6 +117,15 @@ class Conversation:
                 else:
                     ret += ""
             ret = ret.lstrip(self.sep)
+        elif self.sep_style == SeparatorStyle.DEEPSEEK:
+            seps = [self.sep, self.sep2]
+            ret = system_prompt
+            for i, (role, message) in enumerate(self.messages):
+                if message:
+                    ret += role + ": " + message + seps[i % 2]
+                else:
+                    ret += role + ":"
+            return ret
         else:
             raise ValueError(f"Invalid style: {self.sep_style}")
 
@@ -217,7 +227,7 @@ class Conversation:
             Conversation: A new Conversation object with the same data.
         """
         return Conversation(
-            system_template=self.system_template,
+            system_message=self.system_message,
             roles=self.roles,
             messages=[[x, y] for x, y in self.messages],
             offset=self.offset,
@@ -237,7 +247,7 @@ class Conversation:
         """
         if len(self.get_images()) > 0:
             return {
-                "system_template": self.system_template,
+                "system_template": self.system_message,
                 "roles": self.roles,
                 "messages": [[x, y[0] if type(y) is tuple else y] for x, y in self.messages],
                 "offset": self.offset,
@@ -249,7 +259,7 @@ class Conversation:
                 "version": self.version,
             }
         return {
-            "system_template": self.system_template,
+            "system_template": self.system_message,
             "roles": self.roles,
             "messages": self.messages,
             "offset": self.offset,
@@ -263,7 +273,7 @@ class Conversation:
 
 
 conv_llava_plain = Conversation(
-    system_template="",
+    system_message="",
     roles=("", ""),
     messages=(),
     offset=0,
@@ -275,8 +285,8 @@ conv_llava_plain = Conversation(
     version="llava_plain",
 )
 conv_llava_vicuna_v1 = Conversation(
-    system_template="A chat between a curious human and an artificial intelligence assistant. "
-                    "The assistant gives helpful, detailed, and polite answers to the human's questions.",
+    system_message="A chat between a curious human and an artificial intelligence assistant. "
+                   "The assistant gives helpful, detailed, and polite answers to the human's questions.",
     roles=("USER", "ASSISTANT"),
     messages=(),
     offset=0,
@@ -288,9 +298,9 @@ conv_llava_vicuna_v1 = Conversation(
     version="llava_v1",
 )
 conv_llava_vicuna_v1_mmtag = Conversation(
-    system_template="A chat between a curious user and an artificial intelligence assistant. "
-                    "The assistant is able to understand the visual content that the user provides, and assist the user with a variety of tasks using natural language."
-                    "The visual content will be provided with the following format: <Image>visual content</Image>.",
+    system_message="A chat between a curious user and an artificial intelligence assistant. "
+                   "The assistant is able to understand the visual content that the user provides, and assist the user with a variety of tasks using natural language."
+                   "The visual content will be provided with the following format: <Image>visual content</Image>.",
     roles=("USER", "ASSISTANT"),
     messages=(),
     offset=0,
@@ -301,10 +311,9 @@ conv_llava_vicuna_v1_mmtag = Conversation(
     skip_next=False,
     version="llava_v1_mmtag",
 )
-
 conv_llava_llama_2 = Conversation(
-    system_template="You are a helpful language and vision assistant. You are able to understand the visual content that the user provides, "
-                    "and assist the user with a variety of tasks using natural language.",
+    system_message="You are a helpful language and vision assistant. You are able to understand the visual content that the user provides, "
+                   "and assist the user with a variety of tasks using natural language.",
     roles=("USER", "ASSISTANT"),
     messages=(),
     offset=0,
@@ -315,10 +324,22 @@ conv_llava_llama_2 = Conversation(
     skip_next=False,
     version="llava_llama_2",
 )
+conv_llava_deepseek = Conversation(
+    system_message="<｜begin▁of▁sentence｜>",
+    roles=("User", "Assistant"),
+    messages=(),
+    offset=0,
+    sep_style=SeparatorStyle.DEEPSEEK,
+    sep="\n\n",
+    sep2="<｜end▁of▁sentence｜>",
+    stop_str="<｜end▁of▁sentence｜>",
+    skip_next=False,
+    version="deepseek",
+)
 
 conv_vicuna_v1 = Conversation(
-    system_template="A chat between a curious user and an artificial intelligence assistant. "
-                    "The assistant gives helpful, detailed, and polite answers to the user's questions.",
+    system_message="A chat between a curious user and an artificial intelligence assistant. "
+                   "The assistant gives helpful, detailed, and polite answers to the user's questions.",
     roles=("USER", "ASSISTANT"),
     messages=(),
     offset=0,
@@ -330,10 +351,10 @@ conv_vicuna_v1 = Conversation(
     version="vicuna_v1",
 )
 conv_llama_2 = Conversation(
-    system_template="You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe. "
-                    "Please ensure that your responses are socially unbiased and positive in nature. "
-                    "If a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. "
-                    "If you don't know the answer to a question, please don't share false information.",
+    system_message="You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe. "
+                   "Please ensure that your responses are socially unbiased and positive in nature. "
+                   "If a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. "
+                   "If you don't know the answer to a question, please don't share false information.",
     roles=("USER", "ASSISTANT"),
     messages=(),
     offset=0,
@@ -344,6 +365,18 @@ conv_llama_2 = Conversation(
     skip_next=False,
     version="llama_2",
 )
+conv_deepseek = Conversation(
+    system_message="<｜begin▁of▁sentence｜>",
+    roles=("User", "Assistant"),
+    messages=(),
+    offset=0,
+    sep_style=SeparatorStyle.DEEPSEEK,
+    sep="\n\n",
+    sep2="<｜end▁of▁sentence｜>",
+    stop_str="<｜end▁of▁sentence｜>",
+    skip_next=False,
+    version="deepseek",
+)
 
 conv_templates = {
     # pretrain.
@@ -351,9 +384,11 @@ conv_templates = {
     "llava_vicuna_v1": conv_llava_vicuna_v1,
     "llava_vicuna_v1_mmtag": conv_llava_vicuna_v1_mmtag,
     "llava_llama_2": conv_llava_llama_2,
+    "llava_deepseek": conv_llava_deepseek,
 
     # finetune.
     "vicuna_v1": conv_vicuna_v1,
     "llama_2": conv_llama_2,
+    "deepseek": conv_deepseek,
 }
 default_conversation = conv_templates["vicuna_v1"]
