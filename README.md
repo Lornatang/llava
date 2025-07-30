@@ -8,14 +8,14 @@ LLaVA: Large Language and Vision Assistant. From data to deployment.
 
 **1. Clone repository**
 
-```bash
+```shell
 git clone https://github.com/Lornatang/llava.git
 cd llava
 ```
 
 **2. Install Package**
 
-```bash
+```shell
 conda create -n llava python=3.11.13 -y
 conda activate llava
 pip3 install --upgrade pip
@@ -80,9 +80,9 @@ We follow the original author's training methods and training hyperparameters, a
 
 #### 1. Manually download pretrained model weights
 
-```bash
-huggingface-cli download openai/clip-vit-large-patch14-336 --local-dir ./results/pretrained_models/openai/clip-vit-large-patch14-336
-huggingface-cli download lmsys/vicuna-13b-v1.5 --local-dir ./results/pretrained_models/lmsys/vicuna-13b-v1.5
+```shell
+hf download openai/clip-vit-large-patch14-336 --local-dir ./results/pretrained_models/openai/clip-vit-large-patch14-336
+hf download lmsys/vicuna-13b-v1.5 --local-dir ./results/pretrained_models/lmsys/vicuna-13b-v1.5
 ```
 
 The following models can be downloaded for quick experimentation.
@@ -92,7 +92,7 @@ The following models can be downloaded for quick experimentation.
 
 #### 2. Run pretrain script
 
-```bash
+```shell
 bash ./tools/pretrain/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-blip_laion_cc_sbu_558k.sh
 ```
 
@@ -104,7 +104,7 @@ We follow the original author's training methods and training hyperparameters, a
 
 #### 1. Run finetune script
 
-```bash
+```shell
 bash ./tools/finetune/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-llava_v1_5_mix665k.sh
 ```
 
