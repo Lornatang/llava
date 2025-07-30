@@ -869,19 +869,11 @@ def train(attn_implementation=None):
             use_fast=False,
         )
 
-    if model_args.version == "vicuna_v0":
-        if tokenizer.pad_token is None:
-            smart_tokenizer_and_embedding_resize(
-                special_tokens_dict=dict(pad_token="[PAD]"),
-                tokenizer=tokenizer,
-                model=model,
-            )
+    tokenizer.pad_token = tokenizer.unk_token
+    if model_args.version in conv_templates:
+        default_conversation = conv_templates[model_args.version]
     else:
-        tokenizer.pad_token = tokenizer.unk_token
-        if model_args.version in conv_templates:
-            default_conversation = conv_templates[model_args.version]
-        else:
-            default_conversation = conv_templates["vicuna_v1"]
+        default_conversation = conv_templates["vicuna_v1"]
 
     if model_args.vision_tower is not None:
         model.get_model().initialize_vision_modules(
