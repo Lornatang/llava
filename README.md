@@ -93,10 +93,10 @@ The following models can be downloaded for quick experimentation.
 #### 2. Run pretrain script
 
 ```bash
-bash ./tools/pretrain.sh
+bash ./tools/pretrain/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-blip_laion_cc_sbu_558k.sh
 ```
 
-More details about train please see: [pretrain.sh](./tools/pretrain.sh)
+More details about train please see: [pretrain.sh](./tools/pretrain/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-blip_laion_cc_sbu_558k.sh)
 
 ### Fine-tuning
 
@@ -105,10 +105,10 @@ We follow the original author's training methods and training hyperparameters, a
 #### 1. Run finetune script
 
 ```bash
-bash ./tools/finetune.sh
+bash ./tools/finetune/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-llava_v1_5_mix665k.sh
 ```
 
-More details about train please see: [finetune.sh](./tools/finetune.sh)
+More details about train please see: [finetune.sh](./tools/finetune/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-llava_v1_5_mix665k.sh)
 
 ## Citation
 
