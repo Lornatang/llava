@@ -24,19 +24,21 @@ import transformers
 from PIL import Image
 from deepspeed import zero
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
-from peft.tuners.lora import LoraLayer
-from torch import nn
-
 from llava.constants import IGNORE_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.engine.trainer import LLaVATrainer
 from llava.models.llm.llama import LlavaLlamaForCausalLM
-from llava.utils.conversation import SeparatorStyle, conv_templates, default_conversation
+from llava.utils.conversation import SeparatorStyle, conv_templates
 from llava.utils.ops import convert_expand_to_square, tokenizer_image_token
+from peft.tuners.lora import LoraLayer
 
 local_rank = None
 
+__all__ = [
+    "ModelArguments", "DataArguments", "TrainingArguments",
+]
 
-def rank0_print(*args) -> None:
+
+def _rank0_print(*args) -> None:
     """Prints messages only from the process with rank 0.
 
     Args:
@@ -44,6 +46,65 @@ def rank0_print(*args) -> None:
     """
     if local_rank == 0:
         print(*args)
+
+
+def _tokenize_fn(strings: Sequence[str],
+                 tokenizer: transformers.PreTrainedTokenizer) -> Dict:
+    """Tokenize a list of strings."""
+    tokenized_list = [
+        tokenizer(
+            text,
+            return_tensors="pt",
+            padding="longest",
+            max_length=tokenizer.model_max_length,
+            truncation=True,
+        ) for text in strings
+    ]
+    input_ids = labels = [
+        tokenized.input_ids[0] for tokenized in tokenized_list
+    ]
+    input_ids_lens = labels_lens = [
+        tokenized.input_ids.ne(tokenizer.pad_token_id).sum().item()
+        for tokenized in tokenized_list
+    ]
+    return dict(
+        input_ids=input_ids,
+        labels=labels,
+        input_ids_lens=input_ids_lens,
+        labels_lens=labels_lens,
+    )
+
+
+def _mask_targets(target, tokenized_lens, speakers):
+    # cur_idx = 0
+    cur_idx = tokenized_lens[0]
+    tokenized_lens = tokenized_lens[1:]
+    target[:cur_idx] = IGNORE_INDEX
+    for tokenized_len, speaker in zip(tokenized_lens, speakers):
+        if speaker == "human":
+            target[cur_idx + 2:cur_idx + tokenized_len] = IGNORE_INDEX
+        cur_idx += tokenized_len
+
+
+def _add_speaker_and_signal(header, source, get_conversation=True, version:str="vicuna_v1"):
+    """Add speaker and start/end signal on each round."""
+    BEGIN_SIGNAL = "### "
+    END_SIGNAL = "\n"
+    conversation = header
+    for sentence in source:
+        from_str = sentence["from"]
+        if from_str.lower() == "human":
+            from_str = conv_templates[version].roles[0]
+        elif from_str.lower() == "gpt":
+            from_str = conv_templates[version].roles[1]
+        else:
+            from_str = "unknown"
+        sentence["value"] = (BEGIN_SIGNAL + from_str + ": " +
+                             sentence["value"] + END_SIGNAL)
+        if get_conversation:
+            conversation += sentence["value"]
+    conversation += BEGIN_SIGNAL
+    return conversation
 
 
 @dataclass
@@ -104,18 +165,6 @@ class TrainingArguments(transformers.TrainingArguments):
     group_by_modality_length: bool = field(default=False)
 
 
-def maybe_zero_3(param, ignore_status=False, name=None):
-    if hasattr(param, "ds_id"):
-        if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
-            if not ignore_status:
-                logging.warning(f"{name}: param.ds_status != ZeroParamStatus.NOT_AVAILABLE: {param.ds_status}")
-        with zero.GatheredParameters([param]):
-            param = param.data.detach().cpu().clone()
-    else:
-        param = param.detach().cpu().clone()
-    return param
-
-
 # Borrowed from peft.utils.get_peft_model_state_dict
 def get_peft_state_maybe_zero_3(named_params, bias):
     if bias == "none":
@@ -171,6 +220,27 @@ def find_all_linear_names(model):
     if "lm_head" in lora_module_names:  # needed for 16-bit
         lora_module_names.remove("lm_head")
     return list(lora_module_names)
+
+
+def maybe_zero_3(param, ignore_status=False, name=None):
+    if hasattr(param, "ds_id"):
+        if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
+            if not ignore_status:
+                logging.warning(f"{name}: param.ds_status != ZeroParamStatus.NOT_AVAILABLE: {param.ds_status}")
+        with zero.GatheredParameters([param]):
+            param = param.data.detach().cpu().clone()
+    else:
+        param = param.detach().cpu().clone()
+    return param
+
+
+def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, data_args) -> Dict:
+    """Make dataset and collator for supervised fine-tuning."""
+    train_dataset = LazySupervisedDataset(tokenizer=tokenizer, data_path=data_args.data_path, data_args=data_args)
+    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
+    return dict(train_dataset=train_dataset,
+                eval_dataset=None,
+                data_collator=data_collator)
 
 
 def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str):
@@ -238,68 +308,65 @@ def smart_tokenizer_and_embedding_resize(
         output_embeddings[-num_new_tokens:] = output_embeddings_avg
 
 
-def _tokenize_fn(strings: Sequence[str],
-                 tokenizer: transformers.PreTrainedTokenizer) -> Dict:
-    """Tokenize a list of strings."""
-    tokenized_list = [
-        tokenizer(
-            text,
-            return_tensors="pt",
-            padding="longest",
-            max_length=tokenizer.model_max_length,
-            truncation=True,
-        ) for text in strings
-    ]
-    input_ids = labels = [
-        tokenized.input_ids[0] for tokenized in tokenized_list
-    ]
-    input_ids_lens = labels_lens = [
-        tokenized.input_ids.ne(tokenizer.pad_token_id).sum().item()
-        for tokenized in tokenized_list
-    ]
-    return dict(
-        input_ids=input_ids,
-        labels=labels,
-        input_ids_lens=input_ids_lens,
-        labels_lens=labels_lens,
-    )
+def preprocess(
+        sources: Dict,
+        tokenizer: transformers.PreTrainedTokenizer,
+        has_image: bool = False,
+        version:str="vicuna_v1",
+) -> Dict:
+    """Preprocess conversations for supervised fine-tuning.
 
+    Args:
+        sources (Dict): A list of conversations, each conversation is a list of sentences.
+        tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use for tokenization.
+        has_image (bool): Whether the conversations contain images.
+    """
+    if version == "plain":
+        return preprocess_plain(sources, tokenizer)
+    if version == "vicuna_v1":
+        return preprocess_vicuna_v1(sources, tokenizer, has_image)
+    if version == "llama_2":
+        return preprocess_llama_2(sources, tokenizer, has_image)
+    # TODO: implemenmts DeepSeek process function.
+    if version == "deepseek_r1":
+        pass
+    if version == "qwen_2":
+        return preprocess_qwen_2(sources, tokenizer, has_image)
 
-def _mask_targets(target, tokenized_lens, speakers):
-    # cur_idx = 0
-    cur_idx = tokenized_lens[0]
-    tokenized_lens = tokenized_lens[1:]
-    target[:cur_idx] = IGNORE_INDEX
-    for tokenized_len, speaker in zip(tokenized_lens, speakers):
-        if speaker == "human":
-            target[cur_idx + 2:cur_idx + tokenized_len] = IGNORE_INDEX
-        cur_idx += tokenized_len
+    # add end signal and concatenate together
+    conversations = []
+    header = None
+    for source in sources:
+        header = f"{conv_templates[version].system_message}\n\n"
+        conversation = _add_speaker_and_signal(header, source, version)
+        conversations.append(conversation)
 
+    # tokenize conversations
+    def get_tokenize_len(prompts):
+        return [len(tokenizer_image_token(prompt, tokenizer)) for prompt in prompts]
 
-def _add_speaker_and_signal(header, source, get_conversation=True):
-    """Add speaker and start/end signal on each round."""
-    BEGIN_SIGNAL = "### "
-    END_SIGNAL = "\n"
-    conversation = header
-    for sentence in source:
-        from_str = sentence["from"]
-        if from_str.lower() == "human":
-            from_str = default_conversation.roles[0]
-        elif from_str.lower() == "gpt":
-            from_str = default_conversation.roles[1]
+    if has_image:
+        input_ids = [tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations]
+    else:
+        conversations_tokenized = _tokenize_fn(conversations, tokenizer)
+        input_ids = conversations_tokenized["input_ids"]
+
+    targets = copy.deepcopy(input_ids)
+    for target, source in zip(targets, sources):
+        if has_image:
+            tokenized_lens = get_tokenize_len([header] + [s["value"] for s in source])
         else:
-            from_str = "unknown"
-        sentence["value"] = (BEGIN_SIGNAL + from_str + ": " +
-                             sentence["value"] + END_SIGNAL)
-        if get_conversation:
-            conversation += sentence["value"]
-    conversation += BEGIN_SIGNAL
-    return conversation
+            tokenized_lens = _tokenize_fn([header] + [s["value"] for s in source], tokenizer)["input_ids_lens"]
+        speakers = [sentence["from"] for sentence in source]
+        _mask_targets(target, tokenized_lens, speakers)
+
+    return dict(input_ids=input_ids, labels=targets)
 
 
 def preprocess_multimodal(
         sources: Dict,
-        data_args: DataArguments
+        data_args: DataArguments,
+        version:str
 ) -> Dict:
     is_multimodal = data_args.is_multimodal
     if not is_multimodal:
@@ -311,7 +378,7 @@ def preprocess_multimodal(
                 sentence["value"] = sentence["value"].replace(DEFAULT_IMAGE_TOKEN, "").strip()
                 sentence["value"] = DEFAULT_IMAGE_TOKEN + "\n" + sentence["value"]
                 sentence["value"] = sentence["value"].strip()
-                if "mmtag" in default_conversation.version:
+                if "mmtag" in conv_templates[version].version:
                     sentence["value"] = sentence["value"].replace(DEFAULT_IMAGE_TOKEN, "<Image>" + DEFAULT_IMAGE_TOKEN + "</Image>")
             replace_token = DEFAULT_IMAGE_TOKEN
             if data_args.mm_use_im_start_end:
@@ -321,94 +388,40 @@ def preprocess_multimodal(
     return sources
 
 
-def preprocess_llama_2(
-        sources,
+def preprocess_plain(
+        sources: Dict,
         tokenizer: transformers.PreTrainedTokenizer,
-        has_image: bool = False
 ) -> Dict:
-    conv = default_conversation.copy()
-    roles = {"human": conv.roles[0], "gpt": conv.roles[1]}
+    """Preprocess conversations in plain style.
 
-    # Apply prompt templates
+    Args:
+        sources (Dict): A list of conversations, each conversation is a list of sentences.
+        tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use for tokenization.
+    """
+    # add end signal and concatenate together
     conversations = []
-    for i, source in enumerate(sources):
-        if roles[source[0]["from"]] != conv.roles[0]:
-            # Skip the first one if it is not from human
-            source = source[1:]
+    for source in sources:
+        assert len(source) == 2
+        assert DEFAULT_IMAGE_TOKEN in source[0]["value"]
+        source[0]["value"] = DEFAULT_IMAGE_TOKEN
+        conversation = source[0]["value"] + source[1]["value"] + conv_templates["llava_plain"].sep
+        conversations.append(conversation)
+    # tokenize conversations
+    input_ids = [tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations]
+    targets = copy.deepcopy(input_ids)
+    for target, source in zip(targets, sources):
+        tokenized_len = len(tokenizer_image_token(source[0]["value"], tokenizer))
+        target[:tokenized_len] = IGNORE_INDEX
 
-        conv.messages = []
-        for j, sentence in enumerate(source):
-            role = roles[sentence["from"]]
-            assert role == conv.roles[j % 2], f"{i}"
-            conv.append_message(role, sentence["value"])
-        conversations.append(conv.get_prompt())
-
-    # Tokenize conversations
-
-    if has_image:
-        input_ids = torch.stack([tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations], dim=0)
-    else:
-        input_ids = tokenizer(
-            conversations,
-            return_tensors="pt",
-            padding="longest",
-            max_length=tokenizer.model_max_length,
-            truncation=True,
-        ).input_ids
-
-    targets = input_ids.clone()
-
-    assert conv.sep_style == SeparatorStyle.LLAMA_2
-
-    # Mask targets
-    sep = "[/INST] "
-    for conversation, target in zip(conversations, targets):
-        total_len = int(target.ne(tokenizer.pad_token_id).sum())
-
-        rounds = conversation.split(conv.sep2)
-        cur_len = 1
-        target[:cur_len] = IGNORE_INDEX
-        for i, rou in enumerate(rounds):
-            if rou == "":
-                break
-
-            parts = rou.split(sep)
-            if len(parts) != 2:
-                break
-            parts[0] += sep
-
-            if has_image:
-                round_len = len(tokenizer_image_token(rou, tokenizer))
-                instruction_len = len(tokenizer_image_token(parts[0], tokenizer)) - 2
-            else:
-                round_len = len(tokenizer(rou).input_ids)
-                instruction_len = len(tokenizer(parts[0]).input_ids) - 2
-
-            target[cur_len: cur_len + instruction_len] = IGNORE_INDEX
-
-            cur_len += round_len
-        target[cur_len:] = IGNORE_INDEX
-
-        if cur_len < tokenizer.model_max_length:
-            if cur_len != total_len:
-                target[:] = IGNORE_INDEX
-                print(
-                    f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}."
-                    f" (ignored)"
-                )
-
-    return dict(
-        input_ids=input_ids,
-        labels=targets,
-    )
+    return dict(input_ids=input_ids, labels=targets)
 
 
 def preprocess_vicuna_v1(
         sources,
         tokenizer: transformers.PreTrainedTokenizer,
-        has_image: bool = False
+        has_image: bool = False,
 ) -> Dict:
-    conv = default_conversation.copy()
+    conv = conv_templates["llava_vicuna_1"].copy()
     roles = {"human": conv.roles[0], "gpt": conv.roles[1]}
 
     # Apply prompt templates
@@ -426,7 +439,6 @@ def preprocess_vicuna_v1(
         conversations.append(conv.get_prompt())
 
     # Tokenize conversations
-
     if has_image:
         input_ids = torch.stack([tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations], dim=0)
     else:
@@ -478,10 +490,7 @@ def preprocess_vicuna_v1(
         if cur_len < tokenizer.model_max_length:
             if cur_len != total_len:
                 target[:] = IGNORE_INDEX
-                print(
-                    f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}."
-                    f" (ignored)"
-                )
+                print(f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}. (ignored)")
 
     return dict(
         input_ids=input_ids,
@@ -489,12 +498,12 @@ def preprocess_vicuna_v1(
     )
 
 
-def preprocess_mpt(
+def preprocess_llama_2(
         sources,
         tokenizer: transformers.PreTrainedTokenizer,
         has_image: bool = False
 ) -> Dict:
-    conv = default_conversation.copy()
+    conv = conv_templates["llava_llama_2"].copy()
     roles = {"human": conv.roles[0], "gpt": conv.roles[1]}
 
     # Apply prompt templates
@@ -512,7 +521,6 @@ def preprocess_mpt(
         conversations.append(conv.get_prompt())
 
     # Tokenize conversations
-
     if has_image:
         input_ids = torch.stack([tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations], dim=0)
     else:
@@ -525,20 +533,18 @@ def preprocess_mpt(
         ).input_ids
 
     targets = input_ids.clone()
-    assert conv.sep_style == SeparatorStyle.MPT
+
+    assert conv.sep_style == SeparatorStyle.LLAMA_2
 
     # Mask targets
-    sep = conv.sep + conv.roles[1]
+    sep = "[/INST] "
     for conversation, target in zip(conversations, targets):
         total_len = int(target.ne(tokenizer.pad_token_id).sum())
 
-        rounds = conversation.split(conv.sep)
-        re_rounds = [conv.sep.join(rounds[:3])]  # system + user + gpt
-        for conv_idx in range(3, len(rounds), 2):
-            re_rounds.append(conv.sep.join(rounds[conv_idx:conv_idx + 2]))  # user + gpt
-        cur_len = 0
+        rounds = conversation.split(conv.sep2)
+        cur_len = 1
         target[:cur_len] = IGNORE_INDEX
-        for i, rou in enumerate(re_rounds):
+        for i, rou in enumerate(rounds):
             if rou == "":
                 break
 
@@ -549,14 +555,10 @@ def preprocess_mpt(
 
             if has_image:
                 round_len = len(tokenizer_image_token(rou, tokenizer))
-                instruction_len = len(tokenizer_image_token(parts[0], tokenizer)) - 1
+                instruction_len = len(tokenizer_image_token(parts[0], tokenizer)) - 2
             else:
                 round_len = len(tokenizer(rou).input_ids)
-                instruction_len = len(tokenizer(parts[0]).input_ids) - 1
-
-            if i != 0 and getattr(tokenizer, "legacy", False):
-                round_len += 1
-                instruction_len += 1
+                instruction_len = len(tokenizer(parts[0]).input_ids) - 2
 
             target[cur_len: cur_len + instruction_len] = IGNORE_INDEX
 
@@ -566,10 +568,7 @@ def preprocess_mpt(
         if cur_len < tokenizer.model_max_length:
             if cur_len != total_len:
                 target[:] = IGNORE_INDEX
-                print(
-                    f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}."
-                    f" (ignored)"
-                )
+                print(f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}. (ignored)")
 
     return dict(
         input_ids=input_ids,
@@ -577,198 +576,104 @@ def preprocess_mpt(
     )
 
 
-def preprocess_plain(
-        sources: Dict,
-        tokenizer: transformers.PreTrainedTokenizer,
-) -> Dict:
-    """Preprocess conversations in plain style.
-
-    Args:
-        sources (Dict): A list of conversations, each conversation is a list of sentences.
-        tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use for tokenization.
-    """
-    # add end signal and concatenate together
-    conversations = []
-    for source in sources:
-        assert len(source) == 2
-        assert DEFAULT_IMAGE_TOKEN in source[0]["value"]
-        source[0]["value"] = DEFAULT_IMAGE_TOKEN
-        conversation = source[0]["value"] + source[1]["value"] + default_conversation.sep
-        conversations.append(conversation)
-    # tokenize conversations
-    input_ids = [tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations]
-    targets = copy.deepcopy(input_ids)
-    for target, source in zip(targets, sources):
-        tokenized_len = len(tokenizer_image_token(source[0]["value"], tokenizer))
-        target[:tokenized_len] = IGNORE_INDEX
-
-    return dict(input_ids=input_ids, labels=targets)
-
-
-def preprocess(
-        sources: Dict,
+def preprocess_deepseek_r1(
+        sources,
         tokenizer: transformers.PreTrainedTokenizer,
         has_image: bool = False
 ) -> Dict:
-    """Preprocess conversations for supervised fine-tuning.
+    pass
 
-    Args:
-        sources (Dict): A list of conversations, each conversation is a list of sentences.
-        tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use for tokenization.
-        has_image (bool): Whether the conversations contain images.
-    """
-    if default_conversation.sep_style == SeparatorStyle.PLAIN:
-        return preprocess_plain(sources, tokenizer)
-    if default_conversation.sep_style == SeparatorStyle.LLAMA_2:
-        return preprocess_llama_2(sources, tokenizer, has_image=has_image)
-    if default_conversation.version.startswith("vicuna_v1"):
-        return preprocess_vicuna_v1(sources, tokenizer, has_image=has_image)
-    # add end signal and concatenate together
+
+def preprocess_qwen_2(
+        sources,
+        tokenizer: transformers.PreTrainedTokenizer,
+        has_image: bool = False
+) -> Dict:
+    conv = conv_templates["llava_qwen_2"].copy()
+    roles = {"human": conv.roles[0], "gpt": conv.roles[1]}
+
+    # Apply prompt templates
     conversations = []
-    header = None
-    for source in sources:
-        header = f"{default_conversation.system_message}\n\n"
-        conversation = _add_speaker_and_signal(header, source)
-        conversations.append(conversation)
+    for i, source in enumerate(sources):
+        if roles[source[0]["from"]] != conv.roles[0]:
+            # Skip the first one if it is not from human
+            source = source[1:]
 
-    # tokenize conversations
-    def get_tokenize_len(prompts):
-        return [len(tokenizer_image_token(prompt, tokenizer)) for prompt in prompts]
+        conv.messages = []
+        for j, sentence in enumerate(source):
+            role = roles[sentence["from"]]
+            assert role == conv.roles[j % 2], f"{i}"
+            conv.append_message(role, sentence["value"])
+        conversations.append(conv.get_prompt())
 
+    # Tokenize conversations
     if has_image:
-        input_ids = [tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations]
+        input_ids = torch.stack([tokenizer_image_token(prompt, tokenizer, return_tensors='pt') for prompt in conversations], dim=0)
     else:
-        conversations_tokenized = _tokenize_fn(conversations, tokenizer)
-        input_ids = conversations_tokenized["input_ids"]
+        input_ids = tokenizer(
+            conversations,
+            return_tensors="pt",
+            padding="longest",
+            max_length=tokenizer.model_max_length,
+            truncation=True,
+        ).input_ids
 
-    targets = copy.deepcopy(input_ids)
-    for target, source in zip(targets, sources):
-        if has_image:
-            tokenized_lens = get_tokenize_len([header] + [s["value"] for s in source])
-        else:
-            tokenized_lens = _tokenize_fn([header] + [s["value"] for s in source], tokenizer)["input_ids_lens"]
-        speakers = [sentence["from"] for sentence in source]
-        _mask_targets(target, tokenized_lens, speakers)
+    targets = input_ids.clone()
 
-    return dict(input_ids=input_ids, labels=targets)
+    assert conv.sep_style == conversation_lib.SeparatorStyle.QWEN_2
 
+    # Mask targets
+    sep = conv.sep + conv.roles[1] + ": "
+    for conversation, target in zip(conversations, targets):
+        total_len = int(target.ne(tokenizer.pad_token_id).sum())
 
-class LazySupervisedDataset(torch.utils.data.Dataset):
-    """Dataset for supervised fine-tuning."""
+        rounds = conversation.split(conv.sep2)
+        rounds_len = len(rounds)
+        cur_len = 0
+        # target[:cur_len] = IGNORE_INDEX
+        for i, rou in enumerate(rounds):
+            if rou == "":
+                break
 
-    def __init__(self, data_path: str,
-                 tokenizer: transformers.PreTrainedTokenizer,
-                 data_args: DataArguments):
-        super(LazySupervisedDataset, self).__init__()
-        list_data_dict = json.load(open(data_path, "r"))
+            parts = rou.split(sep)
+            if len(parts) != 2:
+                break
+            parts[0] += sep
 
-        rank0_print("Formatting inputs...Skip in lazy mode")
-        self.tokenizer = tokenizer
-        self.list_data_dict = list_data_dict
-        self.data_args = data_args
+            if has_image:
+                round_ids = tokenizer_image_token(rou, tokenizer)
+                instruction_ids = tokenizer_image_token(parts[0], tokenizer)
+                equal_parts = [x == y for x, y in zip(round_ids, instruction_ids)]
 
-    def __len__(self):
-        return len(self.list_data_dict)
+                instruction_len = equal_parts.index(False) if False in equal_parts else len(equal_parts)
+                round_len = len(round_ids)
 
-    @property
-    def lengths(self):
-        length_list = []
-        for sample in self.list_data_dict:
-            image_tokens = 128 if "image" in sample else 0
-            length_list.append(sum(len(conv["value"].split()) for conv in sample["conversations"]) + image_tokens)
-        return length_list
-
-    @property
-    def modality_lengths(self):
-        length_list = []
-        for sample in self.list_data_dict:
-            cur_len = sum(len(conv["value"].split()) for conv in sample["conversations"])
-            cur_len = cur_len if "image" in sample else -cur_len
-            length_list.append(cur_len)
-        return length_list
-
-    def __getitem__(self, i) -> Dict[str, torch.Tensor]:
-        sources = self.list_data_dict[i]
-        if isinstance(i, int):
-            sources = [sources]
-        assert len(sources) == 1, "Don't know why it is wrapped to a list"
-        image = None
-        if "image" in sources[0]:
-            image_file = self.list_data_dict[i]["image"]
-            image_folder = self.data_args.image_folder
-            processor = self.data_args.image_processor
-            image = Image.open(Path(image_folder, image_file)).convert("RGB")
-            if self.data_args.image_aspect_ratio == "pad":
-                image = convert_expand_to_square(image, tuple(int(x * 255) for x in processor.image_mean))
-                image = processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
             else:
-                image = processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
-            sources = preprocess_multimodal(
-                copy.deepcopy([e["conversations"] for e in sources]),
-                self.data_args)
-        else:
-            sources = copy.deepcopy([e["conversations"] for e in sources])
-        data_dict = preprocess(
-            sources,
-            self.tokenizer,
-            has_image=("image" in self.list_data_dict[i]))
-        if isinstance(i, int):
-            data_dict = dict(input_ids=data_dict["input_ids"][0], labels=data_dict["labels"][0])
+                round_ids = tokenizer(rou).input_ids
+                instruction_ids = tokenizer(parts[0]).input_ids
+                equal_parts = [x == y for x, y in zip(round_ids, instruction_ids)]
 
-        # Image exists in the data.
-        if "image" in self.list_data_dict[i]:
-            data_dict["image"] = image
-        elif self.data_args.is_multimodal:
-            # The image does not exist in the data, but the model is multimodal
-            crop_size = self.data_args.image_processor.crop_size
-            data_dict["image"] = torch.zeros(3, crop_size["height"], crop_size["width"])
-        return data_dict
+                instruction_len = equal_parts.index(False) if False in equal_parts else len(equal_parts)
+                round_len = len(round_ids)
 
+            if i != 0 and not tokenizer.legacy and IS_TOKENIZER_GREATER_THAN_0_14:
+                round_len += 1
+                instruction_len += 1
 
-@dataclass
-class DataCollatorForSupervisedDataset(object):
-    """Collate examples for supervised fine-tuning."""
+            target[cur_len: cur_len + instruction_len] = IGNORE_INDEX
 
-    tokenizer: transformers.PreTrainedTokenizer
+            cur_len += round_len
+        target[cur_len:] = IGNORE_INDEX
 
-    def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
-        input_ids, labels = tuple([instance[key] for instance in instances]
-                                  for key in ("input_ids", "labels"))
-        input_ids = torch.nn.utils.rnn.pad_sequence(
-            input_ids,
-            batch_first=True,
-            padding_value=self.tokenizer.pad_token_id)
-        labels = torch.nn.utils.rnn.pad_sequence(labels,
-                                                 batch_first=True,
-                                                 padding_value=IGNORE_INDEX)
-        input_ids = input_ids[:, :self.tokenizer.model_max_length]
-        labels = labels[:, :self.tokenizer.model_max_length]
-        batch = dict(
-            input_ids=input_ids,
-            labels=labels,
-            attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
-        )
+        if cur_len < tokenizer.model_max_length:
+            if cur_len != total_len + rounds_len - 2:
+                target[:] = IGNORE_INDEX
+                print(f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}. (ignored)")
 
-        if "image" in instances[0]:
-            images = [instance["image"] for instance in instances]
-            if all(x is not None and x.shape == images[0].shape for x in images):
-                batch["images"] = torch.stack(images)
-            else:
-                batch["images"] = images
-
-        return batch
-
-
-def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer,
-                                data_args) -> Dict:
-    """Make dataset and collator for supervised fine-tuning."""
-    train_dataset = LazySupervisedDataset(tokenizer=tokenizer,
-                                          data_path=data_args.data_path,
-                                          data_args=data_args)
-    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
-    return dict(train_dataset=train_dataset,
-                eval_dataset=None,
-                data_collator=data_collator)
+    return dict(
+        input_ids=input_ids,
+        labels=targets,
+    )
 
 
 def train(attn_implementation=None):
@@ -850,7 +755,7 @@ def train(attn_implementation=None):
                 model.to(torch.bfloat16)
             if training_args.fp16:
                 model.to(torch.float16)
-        rank0_print("Adding LoRA adapters...")
+        _rank0_print("Adding LoRA adapters...")
         model = get_peft_model(model, lora_config)
 
     if "mpt" in model_args.model_name_or_path:
@@ -870,10 +775,6 @@ def train(attn_implementation=None):
         )
 
     tokenizer.pad_token = tokenizer.unk_token
-    if model_args.version in conv_templates:
-        default_conversation = conv_templates[model_args.version]
-    else:
-        default_conversation = conv_templates["vicuna_v1"]
 
     if model_args.vision_tower is not None:
         model.get_model().initialize_vision_modules(
@@ -923,8 +824,7 @@ def train(attn_implementation=None):
                     if training_args.bf16 and module.weight.dtype == torch.float32:
                         module = module.to(torch.bfloat16)
 
-    data_module = make_supervised_data_module(tokenizer=tokenizer,
-                                              data_args=data_args)
+    data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
     trainer = LLaVATrainer(model=model,
                            processing_class=tokenizer,
                            args=training_args,
@@ -952,6 +852,115 @@ def train(attn_implementation=None):
             torch.save(non_lora_state_dict, Path(training_args.output_dir, "non_lora_trainables.bin"))
     else:
         safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
+
+
+class LazySupervisedDataset(torch.utils.data.Dataset):
+    """Dataset for supervised fine-tuning."""
+
+    def __init__(
+            self,
+            data_path: str,
+            tokenizer: transformers.PreTrainedTokenizer,
+            data_args: DataArguments,
+    ) -> None:
+        super().__init__()
+        list_data_dict = json.load(open(data_path, "r"))
+
+        _rank0_print("Formatting inputs...Skip in lazy mode")
+        self.tokenizer = tokenizer
+        self.list_data_dict = list_data_dict
+        self.data_args = data_args
+
+    def __len__(self):
+        return len(self.list_data_dict)
+
+    @property
+    def lengths(self):
+        length_list = []
+        for sample in self.list_data_dict:
+            image_tokens = 128 if "image" in sample else 0
+            length_list.append(sum(len(conv["value"].split()) for conv in sample["conversations"]) + image_tokens)
+        return length_list
+
+    @property
+    def modality_lengths(self):
+        length_list = []
+        for sample in self.list_data_dict:
+            cur_len = sum(len(conv["value"].split()) for conv in sample["conversations"])
+            cur_len = cur_len if "image" in sample else -cur_len
+            length_list.append(cur_len)
+        return length_list
+
+    def __getitem__(self, i) -> Dict[str, torch.Tensor]:
+        sources = self.list_data_dict[i]
+        if isinstance(i, int):
+            sources = [sources]
+        assert len(sources) == 1, "Don't know why it is wrapped to a list"
+        image = None
+        if "image" in sources[0]:
+            image_file = self.list_data_dict[i]["image"]
+            image_folder = self.data_args.image_folder
+            processor = self.data_args.image_processor
+            image = Image.open(Path(image_folder, image_file)).convert("RGB")
+            if self.data_args.image_aspect_ratio == "pad":
+                image = convert_expand_to_square(image, tuple(int(x * 255) for x in processor.image_mean))
+                image = processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
+            else:
+                image = processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
+            sources = preprocess_multimodal(
+                copy.deepcopy([e["conversations"] for e in sources]),
+                self.data_args)
+        else:
+            sources = copy.deepcopy([e["conversations"] for e in sources])
+
+        data_dict = preprocess(
+            sources,
+            self.tokenizer,
+            has_image=("image" in self.list_data_dict[i]),
+        )
+        if isinstance(i, int):
+            data_dict = dict(input_ids=data_dict["input_ids"][0], labels=data_dict["labels"][0])
+
+        # Image exists in the data.
+        if "image" in self.list_data_dict[i]:
+            data_dict["image"] = image
+        elif self.data_args.is_multimodal:
+            # The image does not exist in the data, but the model is multimodal
+            crop_size = self.data_args.image_processor.crop_size
+            data_dict["image"] = torch.zeros(3, crop_size["height"], crop_size["width"])
+        return data_dict
+
+
+@dataclass
+class DataCollatorForSupervisedDataset(object):
+    """Collate examples for supervised fine-tuning."""
+    tokenizer: transformers.PreTrainedTokenizer
+
+    def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
+        input_ids, labels = tuple([instance[key] for instance in instances] for key in ("input_ids", "labels"))
+        input_ids = torch.nn.utils.rnn.pad_sequence(
+            input_ids,
+            batch_first=True,
+            padding_value=self.tokenizer.pad_token_id)
+        labels = torch.nn.utils.rnn.pad_sequence(labels,
+                                                 batch_first=True,
+                                                 padding_value=IGNORE_INDEX)
+        input_ids = input_ids[:, :self.tokenizer.model_max_length]
+        labels = labels[:, :self.tokenizer.model_max_length]
+        batch = dict(
+            input_ids=input_ids,
+            labels=labels,
+            attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
+        )
+
+        if "image" in instances[0]:
+            images = [instance["image"] for instance in instances]
+            if all(x is not None and x.shape == images[0].shape for x in images):
+                batch["images"] = torch.stack(images)
+            else:
+                batch["images"] = images
+
+        return batch
 
 
 if __name__ == "__main__":
