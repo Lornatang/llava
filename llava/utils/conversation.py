@@ -37,15 +37,16 @@ class SeparatorStyle(Enum):
 @dataclasses.dataclass
 class Conversation:
     """Class representing a conversation with a system prompt, roles, and messages."""
-    system: str
-    roles: Union[List[str], Any]
-    messages: Union[List[str], Any]
-    offset: int
+    system_template: str = "{system_message}"
+    roles: Tuple[str] = ("USER", "ASSISTANT")
+    messages: List[List[str]] = ()
+    offset: int = 0
+    sep_style: SeparatorStyle = SeparatorStyle.VICUNA_V1
     sep: str = "###"
     sep2: str = None
+    stop_str: Union[str, List[str]] = None
     skip_next: bool = False
     version: str = "Unknown"
-    sep_style: SeparatorStyle = SeparatorStyle.VICUNA_V1
 
     def append_message(self, role: Any, message: Any) -> None:
         """Append a message to the conversation.
@@ -76,7 +77,7 @@ class Conversation:
 
         if self.sep_style == SeparatorStyle.PLAIN:  # Text style.
             seps = [self.sep, self.sep2]
-            ret = self.system
+            ret = self.system_template
             for i, (role, message) in enumerate(messages):
                 if message:
                     if type(message) is tuple:
@@ -86,7 +87,7 @@ class Conversation:
                     ret += ""
         elif self.sep_style == SeparatorStyle.VICUNA_V1:  # Vicuna v1 style.
             seps = [self.sep, self.sep2]
-            ret = self.system + seps[0]
+            ret = self.system_template + seps[0]
             for i, (role, message) in enumerate(messages):
                 if message:
                     if type(message) is tuple:
@@ -106,7 +107,7 @@ class Conversation:
                 if message:
                     if type(message) is tuple:
                         message, _, _ = message
-                    if i == 0: message = wrap_sys(self.system) + message
+                    if i == 0: message = wrap_sys(self.system_template) + message
                     if i % 2 == 0:
                         message = wrap_inst(message)
                         ret += self.sep + message
@@ -216,13 +217,15 @@ class Conversation:
             Conversation: A new Conversation object with the same data.
         """
         return Conversation(
-            system=self.system,
+            system_template=self.system_template,
             roles=self.roles,
             messages=[[x, y] for x, y in self.messages],
             offset=self.offset,
+            sep_style=self.sep_style,
             sep=self.sep,
             sep2=self.sep2,
-            sep_style=self.sep_style,
+            stop_str=self.stop_str,
+            skip_next=self.skip_next,
             version=self.version,
         )
 
@@ -234,90 +237,111 @@ class Conversation:
         """
         if len(self.get_images()) > 0:
             return {
-                "system": self.system,
+                "system_template": self.system_template,
                 "roles": self.roles,
                 "messages": [[x, y[0] if type(y) is tuple else y] for x, y in self.messages],
                 "offset": self.offset,
+                "sep_style": self.sep_style.name,
                 "sep": self.sep,
                 "sep2": self.sep2,
+                "stop_str": self.stop_str,
+                "skip_next": self.skip_next,
+                "version": self.version,
             }
         return {
-            "system": self.system,
+            "system_template": self.system_template,
             "roles": self.roles,
             "messages": self.messages,
             "offset": self.offset,
+            "sep_style": self.sep_style.name,
             "sep": self.sep,
             "sep2": self.sep2,
+            "stop_str": self.stop_str,
+            "skip_next": self.skip_next,
+            "version": self.version,
         }
 
 
 conv_llava_plain = Conversation(
-    system="",
+    system_template="",
     roles=("", ""),
     messages=(),
     offset=0,
     sep_style=SeparatorStyle.PLAIN,
     sep="\n",
+    sep2=None,
+    stop_str=None,
+    skip_next=False,
     version="llava_plain",
 )
 conv_llava_vicuna_v1 = Conversation(
-    system="A chat between a curious human and an artificial intelligence assistant. "
-           "The assistant gives helpful, detailed, and polite answers to the human's questions.",
+    system_template="A chat between a curious human and an artificial intelligence assistant. "
+                    "The assistant gives helpful, detailed, and polite answers to the human's questions.",
     roles=("USER", "ASSISTANT"),
     messages=(),
     offset=0,
     sep_style=SeparatorStyle.VICUNA_V1,
     sep=" ",
     sep2="</s>",
+    stop_str=None,
+    skip_next=False,
     version="llava_v1",
 )
 conv_llava_vicuna_v1_mmtag = Conversation(
-    system="A chat between a curious user and an artificial intelligence assistant. "
-           "The assistant is able to understand the visual content that the user provides, and assist the user with a variety of tasks using natural language."
-           "The visual content will be provided with the following format: <Image>visual content</Image>.",
+    system_template="A chat between a curious user and an artificial intelligence assistant. "
+                    "The assistant is able to understand the visual content that the user provides, and assist the user with a variety of tasks using natural language."
+                    "The visual content will be provided with the following format: <Image>visual content</Image>.",
     roles=("USER", "ASSISTANT"),
     messages=(),
     offset=0,
     sep_style=SeparatorStyle.VICUNA_V1,
     sep=" ",
     sep2="</s>",
+    stop_str=None,
+    skip_next=False,
     version="llava_v1_mmtag",
 )
 
 conv_llava_llama_2 = Conversation(
-    system="You are a helpful language and vision assistant. You are able to understand the visual content that the user provides, "
-           "and assist the user with a variety of tasks using natural language.",
+    system_template="You are a helpful language and vision assistant. You are able to understand the visual content that the user provides, "
+                    "and assist the user with a variety of tasks using natural language.",
     roles=("USER", "ASSISTANT"),
     messages=(),
     offset=0,
     sep_style=SeparatorStyle.LLAMA_2,
     sep="<s>",
     sep2="</s>",
+    stop_str=None,
+    skip_next=False,
     version="llava_llama_2",
 )
 
 conv_vicuna_v1 = Conversation(
-    system="A chat between a curious user and an artificial intelligence assistant. "
-           "The assistant gives helpful, detailed, and polite answers to the user's questions.",
+    system_template="A chat between a curious user and an artificial intelligence assistant. "
+                    "The assistant gives helpful, detailed, and polite answers to the user's questions.",
     roles=("USER", "ASSISTANT"),
     messages=(),
     offset=0,
     sep_style=SeparatorStyle.VICUNA_V1,
     sep=" ",
     sep2="</s>",
+    stop_str=None,
+    skip_next=False,
     version="vicuna_v1",
 )
 conv_llama_2 = Conversation(
-    system="You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe. "
-           "Please ensure that your responses are socially unbiased and positive in nature. "
-           "If a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. "
-           "If you don't know the answer to a question, please don't share false information.",
+    system_template="You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe. "
+                    "Please ensure that your responses are socially unbiased and positive in nature. "
+                    "If a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. "
+                    "If you don't know the answer to a question, please don't share false information.",
     roles=("USER", "ASSISTANT"),
     messages=(),
     offset=0,
     sep_style=SeparatorStyle.LLAMA_2,
     sep="<s>",
     sep2="</s>",
+    stop_str=None,
+    skip_next=False,
     version="llama_2",
 )
 
