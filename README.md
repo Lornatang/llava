@@ -20,8 +20,8 @@ conda create -n llava python=3.11.13 -y
 conda activate llava
 pip3 install --upgrade pip
 pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu128
-wget https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.1/flash_attn-2.8.1+cu12torch2.7cxx11abiTRUE-cp311-cp311-linux_x86_64.whl
-pip3 install flash_attn-2.8.1+cu12torch2.7cxx11abiTRUE-cp311-cp311-linux_x86_64.whl
+wget https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.2/flash_attn-2.8.2+cu12torch2.7cxx11abiTRUE-cp311-cp311-linux_x86_64.whl
+pip3 install ./flash_attn-2.8.2+cu12torch2.7cxx11abiTRUE-cp311-cp311-linux_x86_64.whl
 pip3 install -e .
 ```
 
