@@ -22,10 +22,8 @@ from llava.utils.ops import convert_expand_to_square
 
 __all__ = [
     "SeparatorStyle", "Conversation",
-    "conv_templates", "conv_vicuna_v0", "conv_vicuna_v1", "conv_llama_2", "conv_llava_llama_2", "conv_mistral_instruct",
-    "conv_chatml_direct", "conv_llava_plain", "conv_llava_vicuna_v0", "conv_llava_vicuna_v0_mmtag", "conv_llava_vicuna_v1",
-    "conv_llava_vicuna_v1_mmtag", "conv_llava_llama_2",
-    "conv_mpt", "default_conversation",
+    "conv_llava_vicuna_v0", "conv_llava_vicuna_v0_mmtag", "conv_llava_vicuna_v1", "conv_llava_vicuna_v1_mmtag", "conv_llava_plain",
+    "conv_llava_llama_2", "conv_vicuna_v0", "conv_vicuna_v1", "conv_llama_2", "conv_templates", "default_conversation",
 ]
 
 
