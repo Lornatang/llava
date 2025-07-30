@@ -31,7 +31,7 @@ from llava.constants import IGNORE_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_
 from llava.engine.trainer import LLaVATrainer
 from llava.models.llm.llama import LlavaLlamaForCausalLM
 from llava.utils.conversation import SeparatorStyle, conv_templates, default_conversation
-from llava.utils.ops import expand2square, tokenizer_image_token
+from llava.utils.ops import convert_expand_to_square, tokenizer_image_token
 
 local_rank = None
 
@@ -49,7 +49,7 @@ def rank0_print(*args) -> None:
 @dataclass
 class ModelArguments:
     model_name_or_path: Optional[str] = field(default="facebook/opt-125m")
-    version: Optional[str] = field(default="v0")
+    version: Optional[str] = field(default="vicuna_v1")
     freeze_backbone: bool = field(default=False)
     tune_mm_mlp_adapter: bool = field(default=False)
     vision_tower: Optional[str] = field(default=None)
@@ -403,7 +403,7 @@ def preprocess_llama_2(
     )
 
 
-def preprocess_v1(
+def preprocess_vicuna_v1(
         sources,
         tokenizer: transformers.PreTrainedTokenizer,
         has_image: bool = False
@@ -440,7 +440,7 @@ def preprocess_v1(
 
     targets = input_ids.clone()
 
-    assert conv.sep_style == SeparatorStyle.TWO
+    assert conv.sep_style == SeparatorStyle.VICUNA_V1
 
     # Mask targets
     sep = conv.sep + conv.roles[1] + ": "
@@ -621,10 +621,8 @@ def preprocess(
         return preprocess_plain(sources, tokenizer)
     if default_conversation.sep_style == SeparatorStyle.LLAMA_2:
         return preprocess_llama_2(sources, tokenizer, has_image=has_image)
-    if default_conversation.version.startswith("v1"):
-        return preprocess_v1(sources, tokenizer, has_image=has_image)
-    if default_conversation.version == "mpt":
-        return preprocess_mpt(sources, tokenizer, has_image=has_image)
+    if default_conversation.version.startswith("vicuna_v1"):
+        return preprocess_vicuna_v1(sources, tokenizer, has_image=has_image)
     # add end signal and concatenate together
     conversations = []
     header = None
@@ -701,7 +699,7 @@ class LazySupervisedDataset(torch.utils.data.Dataset):
             processor = self.data_args.image_processor
             image = Image.open(Path(image_folder, image_file)).convert("RGB")
             if self.data_args.image_aspect_ratio == "pad":
-                image = expand2square(image, tuple(int(x * 255) for x in processor.image_mean))
+                image = convert_expand_to_square(image, tuple(int(x * 255) for x in processor.image_mean))
                 image = processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
             else:
                 image = processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
@@ -871,15 +869,13 @@ def train(attn_implementation=None):
             use_fast=False,
         )
 
-    if model_args.version == "v0":
+    if model_args.version == "vicuna_v0":
         if tokenizer.pad_token is None:
             smart_tokenizer_and_embedding_resize(
                 special_tokens_dict=dict(pad_token="[PAD]"),
                 tokenizer=tokenizer,
                 model=model,
             )
-    elif model_args.version == "v0.5":
-        tokenizer.pad_token = tokenizer.unk_token
     else:
         tokenizer.pad_token = tokenizer.unk_token
         if model_args.version in conv_templates:

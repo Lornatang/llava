@@ -15,7 +15,7 @@ import ast
 import base64
 import math
 from io import BytesIO
-from typing import Any, List, Tuple, Union, Optional
+from typing import Any, List, Optional, Tuple, Union
 
 import torch
 from PIL import Image
@@ -24,10 +24,33 @@ from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 from llava.constants import IMAGE_TOKEN_INDEX
 
 __all__ = [
-    "divide_to_patches", "expand2square", "load_image_from_base64", "get_anyres_image_grid_shape", "get_length_grouped_indices",
+    "convert_expand_to_square", "divide_to_patches", "load_image_from_base64", "get_anyres_image_grid_shape", "get_length_grouped_indices",
     "get_model_name_from_path", "get_mm_length_grouped_indices", "get_mm_adapter_state_maybe_zero_3", "maybe_zero_3",
     "process_anyres_image", "process_images", "resize_and_pad_image", "select_best_resolution", "tokenizer_image_token", "unpad_image",
 ]
+
+
+def convert_expand_to_square(pil_image: Image.Image, background_color: Union[Tuple[int, int, int], int]) -> Image.Image:
+    """Expands a PIL image to a square by padding with a background color.
+
+    Args:
+        pil_image (PIL.Image.Image): The input image.
+        background_color (Union[Tuple[int, int, int], int]): The background color for padding.
+
+    Returns:
+        PIL.Image.Image: The squared image.
+    """
+    width, height = pil_image.size
+    if width == height:
+        return pil_image
+    elif width > height:
+        result = Image.new(pil_image.mode, (width, width), background_color)
+        result.paste(pil_image, (0, (width - height) // 2))
+        return result
+    else:
+        result = Image.new(pil_image.mode, (height, height), background_color)
+        result.paste(pil_image, ((height - width) // 2, 0))
+        return result
 
 
 def divide_to_patches(image: Image.Image, patch_size: int) -> List[Image.Image]:
@@ -49,29 +72,6 @@ def divide_to_patches(image: Image.Image, patch_size: int) -> List[Image.Image]:
             patches.append(patch)
 
     return patches
-
-
-def expand2square(pil_image: Image.Image, background_color: Union[Tuple[int, int, int], int]) -> Image.Image:
-    """Expands a PIL image to a square by padding with a background color.
-
-    Args:
-        pil_image (PIL.Image.Image): The input image.
-        background_color (Union[Tuple[int, int, int], int]): The background color for padding.
-
-    Returns:
-        PIL.Image.Image: The squared image.
-    """
-    width, height = pil_image.size
-    if width == height:
-        return pil_image
-    elif width > height:
-        result = Image.new(pil_image.mode, (width, width), background_color)
-        result.paste(pil_image, (0, (width - height) // 2))
-        return result
-    else:
-        result = Image.new(pil_image.mode, (height, height), background_color)
-        result.paste(pil_image, ((height - width) // 2, 0))
-        return result
 
 
 def load_image_from_base64(image: str) -> Image.Image:
@@ -290,7 +290,7 @@ def process_images(
     new_images = []
     if image_aspect_ratio == "pad":
         for image in images:
-            image = expand2square(image, tuple(int(x * 255) for x in image_processor.image_mean))
+            image = convert_expand_to_square(image, tuple(int(x * 255) for x in image_processor.image_mean))
             image = image_processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
             new_images.append(image)
     elif image_aspect_ratio == "anyres":

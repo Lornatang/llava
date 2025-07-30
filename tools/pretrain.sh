@@ -1,7 +1,7 @@
 deepspeed ./tools/train.py \
     --deepspeed ./tools/zero3.json \
     --model_name_or_path ./results/pretrained_models/lmsys/vicuna-13b-v1.5 \
-    --version plain \
+    --version llava_plain \
     --data_path ./datasets/llava_pretrain/blip_laion_cc_sbu_558k.json \
     --image_folder ./datasets/llava_pretrain/images \
     --vision_tower ./results/pretrained_models/openai/clip-vit-large-patch14-336 \

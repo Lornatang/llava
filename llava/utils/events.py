@@ -37,7 +37,7 @@ def configure_logging(name: str = None) -> logging.Logger:
     logger.setLevel(logger_level)
 
     # Set the logging format.
-    format_string = logging.Formatter(fmt="%(asctime)s.%(msecs)03d - alphadl - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    format_string = logging.Formatter(fmt="%(asctime)s.%(msecs)03d - llava - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
     # Create a stream handler for logging to the console.
     cli_handler = logging.StreamHandler()
