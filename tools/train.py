@@ -1060,8 +1060,11 @@ def train(attn_implementation: str = None) -> None:
             use_fast=False,
         )
 
-    if tokenizer.pad_token is None:
-        smart_tokenizer_and_embedding_resize(special_tokens_dict=dict(pad_token="[PAD]"), tokenizer=tokenizer, model=model)
+    if tokenizer.unk_token:
+        tokenizer.pad_token = tokenizer.unk_token
+    else:  # use qwen
+        tokenizer.legacy = False
+    conversation_lib.default_conversation = conversation_lib.conv_templates[model_args.version]
 
     if model_args.vision_tower is not None:
         model.get_model().initialize_vision_modules(model_args=model_args, fsdp=training_args.fsdp)
