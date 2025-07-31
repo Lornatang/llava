@@ -119,13 +119,7 @@ class Conversation:
                     ret += ""
             ret = ret.lstrip(self.sep)
         elif self.sep_style == SeparatorStyle.DEEPSEEK_R1:  # DeepSeek-R1 style.
-            seps = [self.sep, self.sep2]
-            ret = system_prompt
-            for i, (role, message) in enumerate(self.messages):
-                if message:
-                    ret += role + ": " + message + seps[i % 2]
-                else:
-                    ret += role + ":"
+            pass
         elif self.sep_style == SeparatorStyle.QWEN_2:  # Qwen-2 style.
             seps = [self.sep, self.sep2]
             ret = self.system_message + seps[0]
@@ -429,5 +423,4 @@ conv_templates = {
     "deepseek_r1": conv_deepseek_r1,
     "qwen_2": conv_qwen_2,
 }
-# FIXME: why must modify this not effective.
-default_conversation = conv_templates["qwen_2"]
+default_conversation = conv_templates["vicuna_v1"]
