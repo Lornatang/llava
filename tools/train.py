@@ -931,7 +931,6 @@ def preprocess_qwen_2(
 
                 instruction_len = equal_parts.index(False) if False in equal_parts else len(equal_parts)
                 round_len = len(round_ids)
-
             else:
                 round_ids = tokenizer(rou).input_ids
                 instruction_ids = tokenizer(parts[0]).input_ids
@@ -970,7 +969,6 @@ def train(attn_implementation: str = None) -> None:
 
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
-    conversation_lib.default_conversation.version = model_args.version
     local_rank = training_args.local_rank
     compute_dtype = (torch.float16 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32))
 
@@ -1117,8 +1115,6 @@ def train(attn_implementation: str = None) -> None:
         trainer.train(resume_from_checkpoint=True)
     else:
         trainer.train()
-
-    trainer.save_state()
 
     model.config.use_cache = True
 
