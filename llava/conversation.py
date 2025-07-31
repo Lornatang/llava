@@ -429,4 +429,5 @@ conv_templates = {
     "deepseek_r1": conv_deepseek_r1,
     "qwen_2": conv_qwen_2,
 }
-default_conversation = conv_templates["vicuna_v1"]
+# FIXME: why must modify this not effective.
+default_conversation = conv_templates["qwen_2"]
