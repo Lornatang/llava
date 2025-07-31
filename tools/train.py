@@ -31,6 +31,7 @@ from llava.models.llm.llama import LlavaLlamaForCausalLM
 from llava.utils.ops import convert_expand_to_square, tokenizer_image_token
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from peft.tuners.lora import LoraLayer
+from transformers import BitsAndBytesConfig
 
 local_rank = None
 
@@ -974,22 +975,23 @@ def train(attn_implementation: str = None) -> None:
 
     bnb_model_from_pretrained_args = {}
     if training_args.bits in [4, 8]:
-        from transformers import BitsAndBytesConfig
-        bnb_model_from_pretrained_args.update(dict(
-            device_map={"": training_args.device},
-            load_in_4bit=training_args.bits == 4,
-            load_in_8bit=training_args.bits == 8,
-            quantization_config=BitsAndBytesConfig(
+        bnb_model_from_pretrained_args.update(
+            dict(
+                device_map={"": training_args.device},
                 load_in_4bit=training_args.bits == 4,
                 load_in_8bit=training_args.bits == 8,
-                llm_int8_skip_modules=["mm_projector"],
-                llm_int8_threshold=6.0,
-                llm_int8_has_fp16_weight=False,
-                bnb_4bit_compute_dtype=compute_dtype,
-                bnb_4bit_use_double_quant=training_args.double_quant,
-                bnb_4bit_quant_type=training_args.quant_type  # {"fp4", "nf4"}
+                quantization_config=BitsAndBytesConfig(
+                    load_in_4bit=training_args.bits == 4,
+                    load_in_8bit=training_args.bits == 8,
+                    llm_int8_skip_modules=["mm_projector"],
+                    llm_int8_threshold=6.0,
+                    llm_int8_has_fp16_weight=False,
+                    bnb_4bit_compute_dtype=compute_dtype,
+                    bnb_4bit_use_double_quant=training_args.double_quant,
+                    bnb_4bit_quant_type=training_args.quant_type  # {"fp4", "nf4"}
+                )
             )
-        ))
+        )
 
     if model_args.vision_tower is not None:
         model = LlavaLlamaForCausalLM.from_pretrained(
@@ -1044,21 +1046,13 @@ def train(attn_implementation: str = None) -> None:
         _rank0_print("Adding LoRA adapters...")
         model = get_peft_model(model, lora_config)
 
-    if "mpt" in model_args.model_name_or_path:
-        tokenizer = transformers.AutoTokenizer.from_pretrained(
-            model_args.model_name_or_path,
-            cache_dir=training_args.cache_dir,
-            model_max_length=training_args.model_max_length,
-            padding_side="right",
-        )
-    else:
-        tokenizer = transformers.AutoTokenizer.from_pretrained(
-            model_args.model_name_or_path,
-            cache_dir=training_args.cache_dir,
-            model_max_length=training_args.model_max_length,
-            padding_side="right",
-            use_fast=False,
-        )
+    tokenizer = transformers.AutoTokenizer.from_pretrained(
+        model_args.model_name_or_path,
+        cache_dir=training_args.cache_dir,
+        model_max_length=training_args.model_max_length,
+        padding_side="right",
+        use_fast=False,
+    )
 
     if tokenizer.unk_token:
         tokenizer.pad_token = tokenizer.unk_token
