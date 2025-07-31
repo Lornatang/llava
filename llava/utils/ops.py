@@ -18,14 +18,15 @@ from io import BytesIO
 from typing import Any, List, Optional, Tuple, Union
 
 import torch
+import transformers
 from PIL import Image
 from deepspeed import zero
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 from llava.constants import IMAGE_TOKEN_INDEX
 
 __all__ = [
-    "convert_expand_to_square", "divide_to_patches", "load_image_from_base64", "get_anyres_image_grid_shape", "get_length_grouped_indices",
-    "get_model_name_from_path", "get_mm_length_grouped_indices", "get_mm_adapter_state_maybe_zero_3", "maybe_zero_3",
+    "convert_expand_to_square", "divide_to_patches", "find_all_linear_names", "load_image_from_base64", "get_anyres_image_grid_shape",
+    "get_length_grouped_indices", "get_model_name_from_path", "get_mm_length_grouped_indices", "get_mm_adapter_state_maybe_zero_3", "maybe_zero_3",
     "process_anyres_image", "process_images", "resize_and_pad_image", "select_best_resolution", "tokenizer_image_token", "unpad_image",
 ]
 
@@ -72,6 +73,30 @@ def divide_to_patches(image: Image.Image, patch_size: int) -> List[Image.Image]:
             patches.append(patch)
 
     return patches
+
+
+def find_all_linear_names(model: transformers.PreTrainedModel) -> List[str]:
+    """Find all linear module names in the model.
+
+    Args:
+        model (transformers.PreTrainedModel): The model to search for linear modules.
+
+    Returns:
+        List[str]: A list of names of linear modules in the model.
+    """
+    cls = torch.nn.Linear
+    lora_module_names = set()
+    multimodal_keywords = ["mm_projector", "vision_tower", "vision_resampler"]
+    for name, module in model.named_modules():
+        if any(mm_keyword in name for mm_keyword in multimodal_keywords):
+            continue
+        if isinstance(module, cls):
+            names = name.split(".")
+            lora_module_names.add(names[0] if len(names) == 1 else names[-1])
+
+    if "lm_head" in lora_module_names:  # needed for 16-bit
+        lora_module_names.remove("lm_head")
+    return list(lora_module_names)
 
 
 def load_image_from_base64(image: str) -> Image.Image:

@@ -28,7 +28,7 @@ from llava import conversation as conversation_lib
 from llava.constants import IGNORE_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.engine.trainer import LLaVATrainer
 from llava.models.llm import LlavaDeepseekV3ForCausalLM, LlavaLlamaForCausalLM, LlavaQwen2ForCausalLM
-from llava.utils.ops import convert_expand_to_square, tokenizer_image_token
+from llava.utils.ops import convert_expand_to_square, find_all_linear_names, tokenizer_image_token
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from peft.tuners.lora import LoraLayer
 
@@ -322,30 +322,6 @@ class LazySupervisedDataset(torch.utils.data.Dataset):
             cur_len = cur_len if "image" in sample else -cur_len
             length_list.append(cur_len)
         return length_list
-
-
-def find_all_linear_names(model: transformers.PreTrainedModel) -> List[str]:
-    """Find all linear module names in the model.
-
-    Args:
-        model (transformers.PreTrainedModel): The model to search for linear modules.
-
-    Returns:
-        List[str]: A list of names of linear modules in the model.
-    """
-    cls = torch.nn.Linear
-    lora_module_names = set()
-    multimodal_keywords = ["mm_projector", "vision_tower", "vision_resampler"]
-    for name, module in model.named_modules():
-        if any(mm_keyword in name for mm_keyword in multimodal_keywords):
-            continue
-        if isinstance(module, cls):
-            names = name.split(".")
-            lora_module_names.add(names[0] if len(names) == 1 else names[-1])
-
-    if "lm_head" in lora_module_names:  # needed for 16-bit
-        lora_module_names.remove("lm_head")
-    return list(lora_module_names)
 
 
 def get_peft_state_maybe_zero_3(named_params: Iterable, bias: str) -> Dict[str, torch.Tensor]:
