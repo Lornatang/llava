@@ -15,59 +15,58 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import nn
-from transformers import AutoConfig, AutoModelForCausalLM, LlamaConfig, LlamaModel, LlamaForCausalLM
+from transformers import AutoConfig, AutoModelForCausalLM, Qwen2Config, Qwen2Model, Qwen2ForCausalLM
 from transformers.generation.utils import GenerateOutput
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from ..arch import LlavaMetaModel, LlavaMetaForCausalLM
 
 __all__ = [
-    "LlavaLlamaConfig", "LlavaLlamaModel", "LlavaLlamaForCausalLM",
+    "LlavaQwen2Config", "LlavaQwen2Model", "LlavaQwen2ForCausalLM",
 ]
 
 
-class LlavaLlamaConfig(LlamaConfig):
-    """Configuration class for llava_llama model."""
-    model_type: str = "llava_llama"
+class LlavaQwen2Config(Qwen2Config):
+    """Configuration class for llava_qwen2 model."""
+    model_type: str = "llava_qwen2"
 
 
-class LlavaLlamaModel(LlavaMetaModel, LlamaModel):
-    """LlavaLlamaModel model class."""
-    config_class: LlavaLlamaConfig = LlavaLlamaConfig
+class LlavaQwen2Model(LlavaMetaModel, Qwen2Model):
+    """LlavaQwen2Model model class."""
+    config_class: LlavaQwen2Config = LlavaQwen2Config
 
-    def __init__(self, config: LlamaConfig) -> None:
-        """Initialize the LlavaLlamaModel model.
+    def __init__(self, config: Qwen2Config) -> None:
+        """Initialize the LlavaQwen2Model model.
 
         Args:
-            config (LlamaConfig): Configuration for the LlavaLlamaModel model.
+            config (Qwen2Config): Configuration for the LlavaQwen2Model model.
         """
         super().__init__(
             config=config,
         )
 
 
-class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
-    """LlavaLlamaForCausalLM model for causal language modeling."""
-    config_class: LlavaLlamaConfig = LlavaLlamaConfig
+class LlavaQwen2ForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
+    """LlavaQwen2ForCausalLM model for causal language modeling."""
+    config_class: LlavaQwen2Config = LlavaQwen2Config
 
-    def __init__(self, config: LlamaConfig) -> None:
-        """Initialize the LlavaLlamaForCausalLM model for causal language modeling.
+    def __init__(self, config: Qwen2Config) -> None:
+        """Initialize the LlavaQwen2ForCausalLM model for causal language modeling.
 
         Args:
-            config (LlamaConfig): Configuration for the LlavaLlamaForCausalLM model.
+            config (Qwen2Config): Configuration for the LlavaQwen2ForCausalLM model.
         """
         super().__init__(
             config=config,
         )
-        self.model: LlavaLlamaModel = LlavaLlamaModel(config)
-        self.pretraining_tp: int = config.pretraining_tp
+        self.model: LlavaQwen2Model = LlavaQwen2Model(config)
         self.vocab_size: int = config.vocab_size
         self.lm_head: nn.Linear = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
         # Initialize weights and apply final processing.
         self.post_init()
 
-    def get_model(self) -> LlavaLlamaModel:
+    def get_model(self) -> LlavaQwen2Model:
         """Get the underlying Llava Llama model."""
         return self.model
 
@@ -220,5 +219,5 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         )
 
 
-AutoConfig.register("llava_llama", LlavaLlamaConfig)
-AutoModelForCausalLM.register(LlavaLlamaConfig, LlavaLlamaForCausalLM)
+AutoConfig.register("llava_qwen2", LlavaQwen2Config)
+AutoModelForCausalLM.register(LlavaQwen2Config, LlavaQwen2ForCausalLM)

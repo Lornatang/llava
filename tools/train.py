@@ -27,19 +27,18 @@ from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 from llava import conversation as conversation_lib
 from llava.constants import IGNORE_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.engine.trainer import LLaVATrainer
-from llava.models.llm.llama import LlavaLlamaForCausalLM
+from llava.models.llm import LlavaLlamaForCausalLM, LlavaQwen2ForCausalLM
 from llava.utils.ops import convert_expand_to_square, tokenizer_image_token
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from peft.tuners.lora import LoraLayer
-from transformers import BitsAndBytesConfig
 
 local_rank = None
 
 __all__ = [
     "ModelArguments", "DataArguments", "DataCollatorForSupervisedDataset", "TrainingArguments", "LazySupervisedDataset", "find_all_linear_names",
     "get_peft_state_maybe_zero_3", "maybe_zero_3", "make_supervised_data_module", "safe_save_model_for_hf_trainer",
-    "smart_tokenizer_and_embedding_resize", "preprocess", "preprocess_multimodal", "preprocess_plain", "preprocess_vicuna_v1", "preprocess_llama_2",
-    "preprocess_deepseek_r1", "preprocess_qwen_2",
+    "smart_tokenizer_and_embedding_resize", "preprocess", "preprocess_multimodal", "preprocess_plain", "preprocess_vicuna_v1", "preprocess_llama2",
+    "preprocess_deepseek_r1", "preprocess_qwen2",
 ]
 
 
@@ -549,13 +548,13 @@ def preprocess(
         return preprocess_plain(sources, tokenizer)
     if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.VICUNA_V1:
         return preprocess_vicuna_v1(sources, tokenizer, has_image)
-    if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.LLAMA_2:
-        return preprocess_llama_2(sources, tokenizer, has_image)
+    if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.LLAMA:
+        return preprocess_llama2(sources, tokenizer, has_image)
     # TODO: implemenmts DeepSeek process function.
     if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.DEEPSEEK_R1:
         pass
-    if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.QWEN_2:
-        return preprocess_qwen_2(sources, tokenizer, has_image)
+    if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.QWEN2:
+        return preprocess_qwen2(sources, tokenizer, has_image)
 
     # add end signal and concatenate together
     conversations = []
@@ -748,12 +747,12 @@ def preprocess_vicuna_v1(
     )
 
 
-def preprocess_llama_2(
+def preprocess_llama2(
         sources: Dict[str, List[Dict[str, str]]],
         tokenizer: transformers.PreTrainedTokenizer,
         has_image: bool = False,
 ) -> Dict[str, List[Dict[str, str]]]:
-    """Preprocess conversations in Llama 2 style.
+    """Preprocess conversations in Llama2 style.
 
     Args:
         sources (Dict[str, List[Dict[str, str]]]): A list of conversations, each conversation is a list of sentences.
@@ -794,7 +793,7 @@ def preprocess_llama_2(
 
     targets = input_ids.clone()
 
-    assert conv.sep_style == conversation_lib.SeparatorStyle.LLAMA_2
+    assert conv.sep_style == conversation_lib.SeparatorStyle.LLAMA
 
     # Mask targets
     sep = "[/INST] "
@@ -854,7 +853,7 @@ def preprocess_deepseek_r1(
     pass
 
 
-def preprocess_qwen_2(
+def preprocess_qwen2(
         sources: Dict[str, List[Dict[str, str]]],
         tokenizer: transformers.PreTrainedTokenizer,
         has_image: bool = False,
@@ -900,7 +899,7 @@ def preprocess_qwen_2(
 
     targets = input_ids.clone()
 
-    assert conv.sep_style == conversation_lib.SeparatorStyle.QWEN_2
+    assert conv.sep_style == conversation_lib.SeparatorStyle.QWEN2
 
     # Mask targets
     sep = conv.sep + conv.roles[1] + ": "
@@ -975,7 +974,7 @@ def train(attn_implementation: str = None) -> None:
                 device_map={"": training_args.device},
                 load_in_4bit=training_args.bits == 4,
                 load_in_8bit=training_args.bits == 8,
-                quantization_config=BitsAndBytesConfig(
+                quantization_config=transformers.BitsAndBytesConfig(
                     load_in_4bit=training_args.bits == 4,
                     load_in_8bit=training_args.bits == 8,
                     llm_int8_skip_modules=["mm_projector"],
@@ -989,23 +988,43 @@ def train(attn_implementation: str = None) -> None:
         )
 
     if model_args.vision_tower is not None:
-        model = LlavaLlamaForCausalLM.from_pretrained(
-            model_args.model_name_or_path,
-            cache_dir=training_args.cache_dir,
-            local_files_only=True,
-            attn_implementation=attn_implementation,
-            torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-            **bnb_model_from_pretrained_args
-        )
+        if "Qwen2" in model_args.model_name_or_path:
+            model = LlavaQwen2ForCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                local_files_only=True,
+                attn_implementation=attn_implementation,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                **bnb_model_from_pretrained_args
+            )
+        else:
+            model = LlavaLlamaForCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                local_files_only=True,
+                attn_implementation=attn_implementation,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                **bnb_model_from_pretrained_args
+            )
     else:
-        model = transformers.LlamaForCausalLM.from_pretrained(
-            model_args.model_name_or_path,
-            cache_dir=training_args.cache_dir,
-            local_files_only=True,
-            attn_implementation=attn_implementation,
-            torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-            **bnb_model_from_pretrained_args
-        )
+        if "Qwen2" in model_args.model_name_or_path:
+            model = transformers.Qwen2ForCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                local_files_only=True,
+                attn_implementation=attn_implementation,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                **bnb_model_from_pretrained_args
+            )
+        else:
+            model = transformers.LlamaForCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                local_files_only=True,
+                attn_implementation=attn_implementation,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                **bnb_model_from_pretrained_args
+            )
     model.config.use_cache = False
 
     if model_args.freeze_backbone:
@@ -1051,7 +1070,7 @@ def train(attn_implementation: str = None) -> None:
 
     if tokenizer.unk_token:
         tokenizer.pad_token = tokenizer.unk_token
-    else:  # use qwen
+    else:  # use qwen2.
         tokenizer.legacy = False
     conversation_lib.default_conversation = conversation_lib.conv_templates[model_args.version]
 
