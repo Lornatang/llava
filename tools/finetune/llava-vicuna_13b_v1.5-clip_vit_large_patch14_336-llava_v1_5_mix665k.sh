@@ -18,7 +18,7 @@ deepspeed ./tools/train.py \
     --per_device_eval_batch_size 4 \
     --gradient_accumulation_steps 1 \
     --save_strategy "steps" \
-    --save_steps 500 \
+    --save_steps 100 \
     --save_total_limit 1 \
     --learning_rate 2e-5 \
     --weight_decay 0. \
@@ -26,7 +26,7 @@ deepspeed ./tools/train.py \
     --lr_scheduler_type "cosine" \
     --logging_steps 1 \
     --bf16 True \
-    --tf32 True \
+    --tf32 False \
     --model_max_length 2048 \
     --gradient_checkpointing True \
     --dataloader_num_workers 4 \

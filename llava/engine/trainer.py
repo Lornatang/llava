@@ -28,7 +28,7 @@ from transformers.trainer import (
     has_length,
 )
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
-
+import os
 __all__ = [
     "LengthGroupedSampler", "LLaVATrainer",
 ]
@@ -186,40 +186,3 @@ class LLaVATrainer(Trainer):
                 LOGGER.info(f"skipped: {skipped / 2 ** 20}M params.")
 
         return self.optimizer
-
-    def _save_checkpoint(self, model: nn.Module, trial: Any) -> None:
-        """Saves a checkpoint during training.
-
-        Args:
-            model (nn.Module): The model being trained.
-            trial (Any): Hyperparameter search trial object.
-        """
-        if getattr(self.args, "tune_mm_mlp_adapter", False):  # finetune.
-            checkpoint_folder = f"{PREFIX_CHECKPOINT_DIR}-{self.state.global_step}"
-            output_dir = Path(self._get_output_dir(trial=trial), checkpoint_folder)
-            output_dir.mkdir(parents=True, exist_ok=True)
-
-            keys_to_match = ["mm_projector", "vision_resampler"]
-            if getattr(self.args, "use_im_start_end", False):
-                keys_to_match.extend(["embed_tokens", "embed_in"])
-
-            weight_to_save = get_mm_adapter_state_maybe_zero_3(self.model.named_parameters(), keys_to_match)
-
-            if self.args.local_rank in (-1, 0):
-                self.model.config.save_pretrained(str(output_dir))
-                torch.save(weight_to_save, Path(output_dir, "mm_projector.bin"))
-        else:  # pretrain.
-            super()._save_checkpoint(model, trial)
-
-    def _save(self, output_dir: Optional[str] = None, state_dict: Optional[dict] = None) -> None:
-        """Saves the model and state dict.
-
-        Args:
-            output_dir (Optional[str], optional): Directory to save to. Defaults to None.
-            state_dict (Optional[dict], optional): State dictionary to save. Defaults to None.
-        """
-        if getattr(self.args, "tune_mm_mlp_adapter", False):  # finetune.
-            return
-
-        # pretrain.
-        super(LLaVATrainer, self)._save(output_dir, state_dict)

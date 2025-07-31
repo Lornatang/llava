@@ -935,7 +935,7 @@ def preprocess_qwen_2(
                 instruction_len = equal_parts.index(False) if False in equal_parts else len(equal_parts)
                 round_len = len(round_ids)
 
-            if i != 0 and not tokenizer.legacy and IS_TOKENIZER_GREATER_THAN_0_14:
+            if i != 0 and not tokenizer.legacy:
                 round_len += 1
                 instruction_len += 1
 
