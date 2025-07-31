@@ -16,7 +16,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence
 
 import torch
 import torch.utils.data
@@ -24,17 +24,20 @@ import transformers
 from PIL import Image
 from deepspeed import zero
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
+from llava import conversation as conversation_lib
 from llava.constants import IGNORE_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.engine.trainer import LLaVATrainer
 from llava.models.llm.llama import LlavaLlamaForCausalLM
-from llava.utils.conversation import SeparatorStyle, conv_templates
 from llava.utils.ops import convert_expand_to_square, tokenizer_image_token
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from peft.tuners.lora import LoraLayer
 
 local_rank = None
 
 __all__ = [
-    "ModelArguments", "DataArguments", "TrainingArguments",
+    "ModelArguments", "DataArguments", "TrainingArguments", "find_all_linear_names", "get_peft_state_maybe_zero_3", "maybe_zero_3",
+    "make_supervised_data_module", "safe_save_model_for_hf_trainer", "smart_tokenizer_and_embedding_resize", "preprocess", "preprocess_multimodal",
+    "preprocess_plain", "preprocess_vicuna_v1", "preprocess_llama_2", "preprocess_deepseek_r1", "preprocess_qwen_2",
 ]
 
 
@@ -48,9 +51,16 @@ def _rank0_print(*args) -> None:
         print(*args)
 
 
-def _tokenize_fn(strings: Sequence[str],
-                 tokenizer: transformers.PreTrainedTokenizer) -> Dict:
-    """Tokenize a list of strings."""
+def _tokenize_fn(strings: Sequence[str], tokenizer: transformers.PreTrainedTokenizer) -> Dict[str, Sequence[torch.Tensor]]:
+    """Tokenize a list of strings.
+
+    Args:
+        strings (Sequence[str]): A list of strings to be tokenized.
+        tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use for tokenization.
+
+    Returns:
+        Dict[str, Sequence[torch.Tensor]]: A dictionary containing the tokenized input IDs and their lengths.
+    """
     tokenized_list = [
         tokenizer(
             text,
@@ -75,8 +85,17 @@ def _tokenize_fn(strings: Sequence[str],
     )
 
 
-def _mask_targets(target, tokenized_lens, speakers):
-    # cur_idx = 0
+def _mask_targets(target: torch.Tensor, tokenized_lens: List[int], speakers: List[str]) -> torch.Tensor:
+    """Mask the targets based on tokenized lengths and speakers.
+
+    Args:
+        target (torch.Tensor): The target tensor to be masked.
+        tokenized_lens (List[int]): A list of tokenized lengths for each round.
+        speakers (List[str]): A list of speakers corresponding to each round.
+
+    Returns:
+        None: The function modifies the target tensor in place.
+    """
     cur_idx = tokenized_lens[0]
     tokenized_lens = tokenized_lens[1:]
     target[:cur_idx] = IGNORE_INDEX
@@ -86,21 +105,29 @@ def _mask_targets(target, tokenized_lens, speakers):
         cur_idx += tokenized_len
 
 
-def _add_speaker_and_signal(header, source, get_conversation=True, version:str="vicuna_v1"):
-    """Add speaker and start/end signal on each round."""
+def _add_speaker_and_signal(header: str, source: List, get_conversation: bool = True) -> str:
+    """Add speaker and start/end signal on each round.
+
+    Args:
+        header (str): The header to be added at the beginning of the conversation.
+        source (List): A list of sentences, each sentence is a dictionary with "from" and "value" keys.
+        get_conversation (bool): Whether to return the full conversation string or just the formatted sentences.
+
+    Returns:
+        str: The formatted conversation string with speakers and signals added.
+    """
     BEGIN_SIGNAL = "### "
     END_SIGNAL = "\n"
     conversation = header
     for sentence in source:
         from_str = sentence["from"]
         if from_str.lower() == "human":
-            from_str = conv_templates[version].roles[0]
+            from_str = conversation_lib.default_conversation.roles[0]
         elif from_str.lower() == "gpt":
-            from_str = conv_templates[version].roles[1]
+            from_str = conversation_lib.default_conversation.roles[1]
         else:
             from_str = "unknown"
-        sentence["value"] = (BEGIN_SIGNAL + from_str + ": " +
-                             sentence["value"] + END_SIGNAL)
+        sentence["value"] = (BEGIN_SIGNAL + from_str + ": " + sentence["value"] + END_SIGNAL)
         if get_conversation:
             conversation += sentence["value"]
     conversation += BEGIN_SIGNAL
@@ -109,8 +136,8 @@ def _add_speaker_and_signal(header, source, get_conversation=True, version:str="
 
 @dataclass
 class ModelArguments:
-    model_name_or_path: Optional[str] = field(default="facebook/opt-125m")
-    version: Optional[str] = field(default="vicuna_v1")
+    model_name_or_path: Optional[str] = field(default="lmsys/vicuna-13b-v1.5")
+    version: Optional[str] = field(default="plain")
     freeze_backbone: bool = field(default=False)
     tune_mm_mlp_adapter: bool = field(default=False)
     vision_tower: Optional[str] = field(default=None)
@@ -165,8 +192,43 @@ class TrainingArguments(transformers.TrainingArguments):
     group_by_modality_length: bool = field(default=False)
 
 
-# Borrowed from peft.utils.get_peft_model_state_dict
-def get_peft_state_maybe_zero_3(named_params, bias):
+def find_all_linear_names(model: transformers.PreTrainedModel) -> List[str]:
+    """Find all linear module names in the model.
+
+    Args:
+        model (transformers.PreTrainedModel): The model to search for linear modules.
+
+    Returns:
+        List[str]: A list of names of linear modules in the model.
+    """
+    cls = torch.nn.Linear
+    lora_module_names = set()
+    multimodal_keywords = ["mm_projector", "vision_tower", "vision_resampler"]
+    for name, module in model.named_modules():
+        if any(mm_keyword in name for mm_keyword in multimodal_keywords):
+            continue
+        if isinstance(module, cls):
+            names = name.split(".")
+            lora_module_names.add(names[0] if len(names) == 1 else names[-1])
+
+    if "lm_head" in lora_module_names:  # needed for 16-bit
+        lora_module_names.remove("lm_head")
+    return list(lora_module_names)
+
+
+def get_peft_state_maybe_zero_3(named_params: Iterable, bias: str) -> Dict[str, torch.Tensor]:
+    """Collects LoRA and/or bias parameters from named parameters, handling DeepSpeed Zero3 if needed.
+
+    Args:
+        named_params (Iterable): Iterable of (name, parameter) tuples from the model.
+        bias (str): Which bias parameters to include. Options:
+            - "none": Only LoRA parameters.
+            - "all": LoRA and all bias parameters.
+            - "lora_only": LoRA parameters and their corresponding bias.
+
+    Returns:
+        Dict[str, torch.Tensor]: A dictionary mapping parameter names to (possibly gathered) tensors.
+    """
     if bias == "none":
         to_return = {k: t for k, t in named_params if "lora_" in k}
     elif bias == "all":
@@ -192,7 +254,16 @@ def get_peft_state_maybe_zero_3(named_params, bias):
     return to_return
 
 
-def get_peft_state_non_lora_maybe_zero_3(named_params, require_grad_only=True):
+def get_peft_state_non_lora_maybe_zero_3(named_params: Iterable, require_grad_only: bool = True) -> Dict[str, torch.Tensor]:
+    """Collects non-LoRA parameters from named parameters, handling DeepSpeed Zero3 if needed.
+
+    Args:
+        named_params (Iterable): Iterable of (name, parameter) tuples from the model.
+        require_grad_only (bool): If True, only include parameters that require gradients.
+
+    Returns:
+        Dict[str, torch.Tensor]: A dictionary mapping parameter names to (possibly gathered) tensors.
+    """
     to_return = {k: t for k, t in named_params if "lora_" not in k}
     if require_grad_only:
         to_return = {k: t for k, t in to_return.items() if t.requires_grad}
@@ -200,29 +271,31 @@ def get_peft_state_non_lora_maybe_zero_3(named_params, require_grad_only=True):
     return to_return
 
 
-def get_mm_adapter_state_maybe_zero_3(named_params, keys_to_match):
+def get_mm_adapter_state_maybe_zero_3(named_params: Iterable, keys_to_match: Optional[List[str]] = None) -> Dict[str, torch.Tensor]:
+    """Collects multimodal adapter parameters from named parameters, handling DeepSpeed Zero3 if needed.
+
+    Args:
+        named_params (Iterable): Iterable of (name, parameter) tuples from the model.
+        keys_to_match (Optional[List[str]]): List of substrings to match in parameter names. If None, all parameters are returned.
+
+    Returns:
+        Dict[str, torch.Tensor]: A dictionary mapping parameter names to (possibly gathered) tensors.
+    """
     to_return = {k: t for k, t in named_params if any(key_match in k for key_match in keys_to_match)}
     to_return = {k: maybe_zero_3(v, ignore_status=True).cpu() for k, v in to_return.items()}
     return to_return
 
 
-def find_all_linear_names(model):
-    cls = torch.nn.Linear
-    lora_module_names = set()
-    multimodal_keywords = ["mm_projector", "vision_tower", "vision_resampler"]
-    for name, module in model.named_modules():
-        if any(mm_keyword in name for mm_keyword in multimodal_keywords):
-            continue
-        if isinstance(module, cls):
-            names = name.split(".")
-            lora_module_names.add(names[0] if len(names) == 1 else names[-1])
+def maybe_zero_3(param: torch.nn.Parameter, ignore_status: bool = False) -> torch.Tensor:
+    """Handles DeepSpeed Zero3 parameters.
 
-    if "lm_head" in lora_module_names:  # needed for 16-bit
-        lora_module_names.remove("lm_head")
-    return list(lora_module_names)
+    Args:
+        param (torch.nn.Parameter): The parameter to process.
+        ignore_status (bool): If True, ignores the ZeroParamStatus check.
 
-
-def maybe_zero_3(param, ignore_status=False, name=None):
+    Returns:
+        torch.Tensor: The processed parameter tensor, detached and moved to CPU.
+    """
     if hasattr(param, "ds_id"):
         if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
             if not ignore_status:
@@ -234,17 +307,32 @@ def maybe_zero_3(param, ignore_status=False, name=None):
     return param
 
 
-def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, data_args) -> Dict:
-    """Make dataset and collator for supervised fine-tuning."""
+def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, data_args: DataArguments) -> Dict[str, torch.utils.data.Dataset]:
+    """Create a dataset and collator for supervised fine-tuning.
+
+    Args:
+        tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use for tokenization.
+        data_args (DataArguments): The data arguments containing paths and configurations.
+
+    Returns:
+        Dict[str, torch.utils.data.Dataset]: A dictionary containing the training dataset, evaluation dataset (if any), and data collator.
+    """
     train_dataset = LazySupervisedDataset(tokenizer=tokenizer, data_path=data_args.data_path, data_args=data_args)
     data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
-    return dict(train_dataset=train_dataset,
-                eval_dataset=None,
-                data_collator=data_collator)
+    return dict(
+        train_dataset=train_dataset,
+        eval_dataset=None,
+        data_collator=data_collator,
+    )
 
 
-def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str):
-    """Collects the state dict and dump to disk."""
+def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str) -> None:
+    """Collects the state dict and dump to disk.
+
+    Args:
+        trainer (transformers.Trainer): The trainer instance.
+        output_dir (str): The directory where the model should be saved.
+    """
     output_path = Path(output_dir)
 
     if getattr(trainer.args, "tune_mm_mlp_adapter", False):
@@ -287,10 +375,13 @@ def smart_tokenizer_and_embedding_resize(
         special_tokens_dict: Dict,
         tokenizer: transformers.PreTrainedTokenizer,
         model: transformers.PreTrainedModel,
-):
+) -> None:
     """Resize tokenizer and embedding.
 
-    Note: This is the unoptimized version that may make your embedding size not be divisible by 64.
+    Args:
+        special_tokens_dict (Dict): A dictionary of special tokens to be added to the tokenizer.
+        tokenizer (transformers.PreTrainedTokenizer): The tokenizer to resize.
+        model (transformers.PreTrainedModel): The model whose embeddings will be resized.
     """
     num_new_tokens = tokenizer.add_special_tokens(special_tokens_dict)
     model.resize_token_embeddings(len(tokenizer))
@@ -299,45 +390,45 @@ def smart_tokenizer_and_embedding_resize(
         input_embeddings = model.get_input_embeddings().weight.data
         output_embeddings = model.get_output_embeddings().weight.data
 
-        input_embeddings_avg = input_embeddings[:-num_new_tokens].mean(
-            dim=0, keepdim=True)
-        output_embeddings_avg = output_embeddings[:-num_new_tokens].mean(
-            dim=0, keepdim=True)
+        input_embeddings_avg = input_embeddings[:-num_new_tokens].mean(dim=0, keepdim=True)
+        output_embeddings_avg = output_embeddings[:-num_new_tokens].mean(dim=0, keepdim=True)
 
         input_embeddings[-num_new_tokens:] = input_embeddings_avg
         output_embeddings[-num_new_tokens:] = output_embeddings_avg
 
 
 def preprocess(
-        sources: Dict,
+        sources: Dict[str, List[Dict[str, str]]],
         tokenizer: transformers.PreTrainedTokenizer,
         has_image: bool = False,
-        version:str="vicuna_v1",
-) -> Dict:
+) -> Dict[str, torch.Tensor]:
     """Preprocess conversations for supervised fine-tuning.
 
     Args:
-        sources (Dict): A list of conversations, each conversation is a list of sentences.
+        sources (Dict[str, List[Dict[str, str]]]): A list of conversations, each conversation is a list of sentences.
         tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use for tokenization.
         has_image (bool): Whether the conversations contain images.
+
+    Returns:
+        Dict[str, torch.Tensor]: A dictionary containing the tokenized input IDs and labels.
     """
-    if version == "plain":
+    if conversation_lib.default_conversation.version in ("plain", "llava_plain"):
         return preprocess_plain(sources, tokenizer)
-    if version == "vicuna_v1":
+    if conversation_lib.default_conversation.version in ("vicuna_v1", "llava_vicuna_v1", "llava_vicuna_v1_mmtag"):
         return preprocess_vicuna_v1(sources, tokenizer, has_image)
-    if version == "llama_2":
+    if conversation_lib.default_conversation.version in ("llama_2", "llava_llama_2"):
         return preprocess_llama_2(sources, tokenizer, has_image)
     # TODO: implemenmts DeepSeek process function.
-    if version == "deepseek_r1":
+    if conversation_lib.default_conversation.version in ("deepseek_r1", "llava_deepseek_r1"):
         pass
-    if version == "qwen_2":
+    if conversation_lib.default_conversation.version in ("qwen_2", "llava_qwen_2"):
         return preprocess_qwen_2(sources, tokenizer, has_image)
 
     # add end signal and concatenate together
     conversations = []
     header = None
     for source in sources:
-        header = f"{conv_templates[version].system_message}\n\n"
+        header = f"{conversation_lib.default_conversation.system_message}\n\n"
         conversation = _add_speaker_and_signal(header, source, version)
         conversations.append(conversation)
 
@@ -360,14 +451,25 @@ def preprocess(
         speakers = [sentence["from"] for sentence in source]
         _mask_targets(target, tokenized_lens, speakers)
 
-    return dict(input_ids=input_ids, labels=targets)
+    return dict(
+        input_ids=input_ids,
+        labels=targets,
+    )
 
 
 def preprocess_multimodal(
-        sources: Dict,
+        sources: Dict[str, List[Dict[str, str]]],
         data_args: DataArguments,
-        version:str
-) -> Dict:
+) -> Dict[str, torch.Tensor]:
+    """Preprocess conversations for multimodal fine-tuning.
+
+    Args:
+        sources (Dict[str, List[Dict[str, str]]]): A list of conversations, each conversation is a list of sentences.
+        data_args (DataArguments): The data arguments containing multimodal configurations.
+
+    Returns:
+        Dict[str, List[Dict[str, str]]]: The preprocessed conversations with image tokens replaced.
+    """
     is_multimodal = data_args.is_multimodal
     if not is_multimodal:
         return sources
@@ -378,7 +480,7 @@ def preprocess_multimodal(
                 sentence["value"] = sentence["value"].replace(DEFAULT_IMAGE_TOKEN, "").strip()
                 sentence["value"] = DEFAULT_IMAGE_TOKEN + "\n" + sentence["value"]
                 sentence["value"] = sentence["value"].strip()
-                if "mmtag" in conv_templates[version].version:
+                if "mmtag" in conversation_lib.default_conversation.version:
                     sentence["value"] = sentence["value"].replace(DEFAULT_IMAGE_TOKEN, "<Image>" + DEFAULT_IMAGE_TOKEN + "</Image>")
             replace_token = DEFAULT_IMAGE_TOKEN
             if data_args.mm_use_im_start_end:
@@ -389,22 +491,24 @@ def preprocess_multimodal(
 
 
 def preprocess_plain(
-        sources: Dict,
+        sources: Dict[str, List[Dict[str, str]]],
         tokenizer: transformers.PreTrainedTokenizer,
-) -> Dict:
+) -> Dict[str, List[Dict[str, str]]]:
     """Preprocess conversations in plain style.
 
     Args:
-        sources (Dict): A list of conversations, each conversation is a list of sentences.
+        sources (Dict[str, List[Dict[str, str]]]): A list of conversations, each conversation is a list of sentences.
         tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use for tokenization.
+
+    Returns:
+        Dict[str, List[Dict[str, str]]]: A dictionary containing the tokenized input IDs and labels.
     """
-    # add end signal and concatenate together
     conversations = []
     for source in sources:
         assert len(source) == 2
         assert DEFAULT_IMAGE_TOKEN in source[0]["value"]
         source[0]["value"] = DEFAULT_IMAGE_TOKEN
-        conversation = source[0]["value"] + source[1]["value"] + conv_templates["llava_plain"].sep
+        conversation = source[0]["value"] + source[1]["value"] + conversation_lib.default_conversation.sep
         conversations.append(conversation)
     # tokenize conversations
     input_ids = [tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations]
@@ -413,7 +517,10 @@ def preprocess_plain(
         tokenized_len = len(tokenizer_image_token(source[0]["value"], tokenizer))
         target[:tokenized_len] = IGNORE_INDEX
 
-    return dict(input_ids=input_ids, labels=targets)
+    return dict(
+        input_ids=input_ids,
+        labels=targets,
+    )
 
 
 def preprocess_vicuna_v1(
@@ -421,7 +528,7 @@ def preprocess_vicuna_v1(
         tokenizer: transformers.PreTrainedTokenizer,
         has_image: bool = False,
 ) -> Dict:
-    conv = conv_templates["llava_vicuna_1"].copy()
+    conv = conversation_lib.default_conversation.copy()
     roles = {"human": conv.roles[0], "gpt": conv.roles[1]}
 
     # Apply prompt templates
@@ -452,7 +559,7 @@ def preprocess_vicuna_v1(
 
     targets = input_ids.clone()
 
-    assert conv.sep_style == SeparatorStyle.VICUNA_V1
+    assert conv.sep_style == conversation_lib.SeparatorStyle.VICUNA_V1
 
     # Mask targets
     sep = conv.sep + conv.roles[1] + ": "
@@ -503,7 +610,7 @@ def preprocess_llama_2(
         tokenizer: transformers.PreTrainedTokenizer,
         has_image: bool = False
 ) -> Dict:
-    conv = conv_templates["llava_llama_2"].copy()
+    conv = conversation_lib.default_conversation.copy()
     roles = {"human": conv.roles[0], "gpt": conv.roles[1]}
 
     # Apply prompt templates
@@ -534,7 +641,7 @@ def preprocess_llama_2(
 
     targets = input_ids.clone()
 
-    assert conv.sep_style == SeparatorStyle.LLAMA_2
+    assert conv.sep_style == conversation_lib.SeparatorStyle.LLAMA_2
 
     # Mask targets
     sep = "[/INST] "
@@ -589,7 +696,7 @@ def preprocess_qwen_2(
         tokenizer: transformers.PreTrainedTokenizer,
         has_image: bool = False
 ) -> Dict:
-    conv = conv_templates["llava_qwen_2"].copy()
+    conv = conversation_lib.default_conversation.copy()
     roles = {"human": conv.roles[0], "gpt": conv.roles[1]}
 
     # Apply prompt templates
@@ -681,6 +788,7 @@ def train(attn_implementation=None):
 
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+    conversation_lib.default_conversation.version = model_args.version
     local_rank = training_args.local_rank
     compute_dtype = (torch.float16 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32))
 
@@ -727,7 +835,6 @@ def train(attn_implementation=None):
         model.model.requires_grad_(False)
 
     if training_args.bits in [4, 8]:
-        from peft import prepare_model_for_kbit_training
         model.config.torch_dtype = (torch.float32 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32))
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=training_args.gradient_checkpointing)
 
@@ -741,7 +848,6 @@ def train(attn_implementation=None):
             model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
 
     if training_args.lora_enable:
-        from peft import LoraConfig, get_peft_model
         lora_config = LoraConfig(
             r=training_args.lora_r,
             lora_alpha=training_args.lora_alpha,
