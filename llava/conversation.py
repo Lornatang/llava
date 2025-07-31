@@ -22,17 +22,17 @@ from llava.utils.ops import convert_expand_to_square
 
 __all__ = [
     "SeparatorStyle", "Conversation",
-    "conv_llava_plain", "conv_llava_vicuna_v1", "conv_llava_vicuna_v1_mmtag", "conv_llava_llama", "conv_llava_deepseek_r1", "conv_vicuna_v1",
-    "conv_llama", "conv_deepseek_r1", "conv_templates", "default_conversation",
+    "conv_llava_plain", "conv_llava_vicuna_v1", "conv_llava_vicuna_v1_mmtag", "conv_llava_llama", "conv_llava_deepseek_v3", "conv_vicuna_v1",
+    "conv_llama", "conv_deepseek_v3", "conv_templates", "default_conversation",
 ]
 
 
 class SeparatorStyle(Enum):
     """Enum for different separator styles used in conversations."""
     PLAIN = auto()  # Text style.
-    VICUNA_V1 = auto()  # Vicuna-v1 style.
+    VICUNA_V1 = auto()  # Vicuna-V1 style.
     LLAMA = auto()  # Llama style.
-    DEEPSEEK_R1 = auto()  # DeepSeek-R1 style.
+    DEEPSEEK_V3 = auto()  # DeepSeek-V3 style.
     QWEN2 = auto()  # Qwen2 style.
 
 
@@ -80,6 +80,7 @@ class Conversation:
         if self.sep_style == SeparatorStyle.PLAIN:  # Text style.
             seps = [self.sep, self.sep2]
             ret = self.system_message
+            
             for i, (role, message) in enumerate(messages):
                 if message:
                     if type(message) is tuple:
@@ -87,9 +88,10 @@ class Conversation:
                     ret += message + seps[i % 2]
                 else:
                     ret += ""
-        elif self.sep_style == SeparatorStyle.VICUNA_V1:  # Vicuna-v1 style.
+        elif self.sep_style == SeparatorStyle.VICUNA_V1:  # Vicuna-V1 style.
             seps = [self.sep, self.sep2]
             ret = self.system_message + seps[0]
+            
             for i, (role, message) in enumerate(messages):
                 if message:
                     if type(message) is tuple:
@@ -118,11 +120,20 @@ class Conversation:
                 else:
                     ret += ""
             ret = ret.lstrip(self.sep)
-        elif self.sep_style == SeparatorStyle.DEEPSEEK_R1:  # DeepSeek-R1 style.
-            pass
+        elif self.sep_style == SeparatorStyle.DEEPSEEK_V3:  # DeepSeek-V3 style.
+            seps = [self.sep, self.sep2]
+            ret = ""
+            
+            for i, (role, message) in enumerate(self.messages):
+                if message:
+                    ret += role + ": " + message + seps[i % 2]
+                else:
+                    ret += role + ":"
+            return ret
         elif self.sep_style == SeparatorStyle.QWEN2:  # Qwen2 style.
             seps = [self.sep, self.sep2]
             ret = self.system_message + seps[0]
+            
             for i, (role, message) in enumerate(messages):
                 if message:
                     if type(message) is tuple:
@@ -313,7 +324,7 @@ conv_llava_vicuna_v1_mmtag = Conversation(
     sep2="</s>",
     stop_str=None,
     skip_next=False,
-    version="llava_v1_mmtag",
+    version="llava_vicuna_v1_mmtag",
 )
 conv_llava_llama = Conversation(
     system_message="You are a helpful language and vision assistant. You are able to understand the visual content that the user provides, "
@@ -328,17 +339,17 @@ conv_llava_llama = Conversation(
     skip_next=False,
     version="llava_llama",
 )
-conv_llava_deepseek_r1 = Conversation(
+conv_llava_deepseek_v3 = Conversation(
     system_message="<｜begin▁of▁sentence｜>",
     roles=("User", "Assistant"),
     messages=(),
     offset=0,
-    sep_style=SeparatorStyle.DEEPSEEK_R1,
+    sep_style=SeparatorStyle.DEEPSEEK_V3,
     sep="\n\n",
     sep2="<｜end▁of▁sentence｜>",
     stop_str="<｜end▁of▁sentence｜>",
     skip_next=False,
-    version="llava_deepseek_r1",
+    version="llava_deepseek_v3",
 )
 conv_llava_qwen2 = Conversation(
     system_message="A chat between a curious user and an artificial intelligence assistant. "
@@ -382,17 +393,17 @@ conv_llama = Conversation(
     skip_next=False,
     version="llama",
 )
-conv_deepseek_r1 = Conversation(
+conv_deepseek_v3 = Conversation(
     system_message="<｜begin▁of▁sentence｜>",
     roles=("User", "Assistant"),
     messages=(),
     offset=0,
-    sep_style=SeparatorStyle.DEEPSEEK_R1,
+    sep_style=SeparatorStyle.DEEPSEEK_V3,
     sep="\n\n",
     sep2="<｜end▁of▁sentence｜>",
     stop_str="<｜end▁of▁sentence｜>",
     skip_next=False,
-    version="deepseek_r1",
+    version="deepseek_v3",
 )
 conv_qwen2 = Conversation(
     system_message="A chat between a curious user and an artificial intelligence assistant. "
@@ -414,13 +425,13 @@ conv_templates = {
     "llava_vicuna_v1": conv_llava_vicuna_v1,
     "llava_vicuna_v1_mmtag": conv_llava_vicuna_v1_mmtag,
     "llava_llama": conv_llava_llama,
-    "llava_deepseek_r1": conv_llava_deepseek_r1,
+    "llava_deepseek_v3": conv_llava_deepseek_v3,
     "llava_qwen2": conv_llava_qwen2,
 
     # finetune.
     "vicuna_v1": conv_vicuna_v1,
     "llama": conv_llama,
-    "deepseek_r1": conv_deepseek_r1,
+    "deepseek_v3": conv_deepseek_v3,
     "qwen2": conv_qwen2,
 }
 default_conversation = conv_templates["vicuna_v1"]
