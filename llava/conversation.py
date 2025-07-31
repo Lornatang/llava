@@ -341,7 +341,7 @@ conv_llava_llama = Conversation(
 )
 conv_llava_deepseek_v3 = Conversation(
     system_message="<｜begin▁of▁sentence｜>",
-    roles=("User", "Assistant"),
+    roles=("USER", "ASSISTANT"),
     messages=(),
     offset=0,
     sep_style=SeparatorStyle.DEEPSEEK_V3,
@@ -395,7 +395,7 @@ conv_llama = Conversation(
 )
 conv_deepseek_v3 = Conversation(
     system_message="<｜begin▁of▁sentence｜>",
-    roles=("User", "Assistant"),
+    roles=("USER", "ASSISTANT"),
     messages=(),
     offset=0,
     sep_style=SeparatorStyle.DEEPSEEK_V3,

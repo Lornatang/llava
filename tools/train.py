@@ -14,6 +14,7 @@
 import copy
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
@@ -828,55 +829,74 @@ def preprocess_deepseek_v3(
         Dict[str, List[Dict[str, str]]]: A dictionary containing the tokenized input IDs and labels.
     """
     conv = conversation_lib.default_conversation.copy()
-    roles = {"human": conv.roles[0], "assistant": conv.roles[1]}
+    roles = {"human": conv.roles[0], "gpt": conv.roles[1]}
 
     # Apply prompt templates.
     conversations = []
-    for source in sources:
+    for i, source in enumerate(sources):
         # Skip the first one if it is not from human.
         if roles[source[0]["from"]] != conv.roles[0]:
             source = source[1:]
 
         conv.messages = []
-        for i, turn in enumerate(source):
-            role = roles[turn["from"]]
-            assert role == conv.roles[i % 2]
-            conv.append_message(role, turn["value"])
+        for j, sentence in enumerate(source):
+            role = roles[sentence["from"]]
+            assert role == conv.roles[j % 2], f"{i}"
+            conv.append_message(role, sentence["value"])
         conversations.append(conv.get_prompt())
 
     # Tokenize conversations.
     if has_image:
-        input_ids = torch.stack([
-            tokenizer_image_token(text, tokenizer, return_tensors="pt")
-            for text in conversations
-        ], dim=0)
+        input_ids = torch.stack(
+            [tokenizer_image_token(prompt, tokenizer, return_tensors='pt') for prompt in conversations], dim=0)
     else:
-        batch = tokenizer(
+        input_ids = tokenizer(
             conversations,
             return_tensors="pt",
             padding="longest",
-            truncation=True,
             max_length=tokenizer.model_max_length,
-        )
-        input_ids = batch.input_ids
+            truncation=True,
+        ).input_ids
+
+    targets = input_ids.clone()
+
+    assert conv.sep_style == conversation_lib.SeparatorStyle.DEEPSEEK
 
     # Mask targets.
-    labels = input_ids.clone()
-    sep_user = conv.sep + conv.roles[0] + ": "
-    sep_bot = conv.sep + conv.roles[1] + ": "
-    for text, label in zip(conversations, labels):
-        rounds = text.split(conv.sep2)
-        pos = 0
-        for index, r in enumerate(rounds):
-            if not r: break
-            parts = r.split(sep_bot)
+    sep = conv.roles[1] + ": "
+    for conversation, target in zip(conversations, targets):
+        total_len = int(target.ne(tokenizer.pad_token_id).sum())
+        rounds = conversation.split(conv.sep2)
+        rounds_len = len(rounds)
+        cur_len = 0
+        for i, rou in enumerate(rounds):
+            if rou == "":
+                break
+
+            parts = rou.split(sep)
             if len(parts) != 2:
                 break
-            inst_len = len(tokenizer(parts[0] + sep_bot).input_ids)
-            label[pos: pos + inst_len] = IGNORE_INDEX
-            round_len = len(tokenizer(r).input_ids)
-            pos += round_len
-        label[pos:] = IGNORE_INDEX
+            parts[0] += sep
+
+            if has_image:
+                round_ids = tokenizer_image_token(rou, tokenizer)
+                instruction_ids = tokenizer_image_token(parts[0], tokenizer)
+            else:
+                round_ids = tokenizer(rou).input_ids
+                instruction_ids = tokenizer(parts[0]).input_ids
+
+            equal_parts = [x == y for x, y in zip(round_ids, instruction_ids)]
+            instruction_len = equal_parts.index(False) if False in equal_parts else len(equal_parts)
+            round_len = len(round_ids)
+
+            if i != 0 and not tokenizer.legacy:
+                round_len += 1
+                instruction_len += 1
+
+            target[cur_len: cur_len + instruction_len] = IGNORE_INDEX
+            cur_len += round_len
+
+        target[cur_len:] = IGNORE_INDEX
 
         if cur_len < tokenizer.model_max_length:
             if cur_len != total_len + rounds_len - 2:
