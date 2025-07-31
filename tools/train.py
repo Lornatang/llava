@@ -549,16 +549,16 @@ def preprocess(
     Returns:
         Dict[str, torch.Tensor]: A dictionary containing the tokenized input IDs and labels.
     """
-    if conversation_lib.default_conversation.version in ("plain", "llava_plain"):
+    if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.PLAIN:
         return preprocess_plain(sources, tokenizer)
-    if conversation_lib.default_conversation.version in ("vicuna_v1", "llava_vicuna_v1", "llava_vicuna_v1_mmtag"):
+    if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.VICUNA_V1:
         return preprocess_vicuna_v1(sources, tokenizer, has_image)
-    if conversation_lib.default_conversation.version in ("llama_2", "llava_llama_2"):
+    if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.LLAMA_2:
         return preprocess_llama_2(sources, tokenizer, has_image)
     # TODO: implemenmts DeepSeek process function.
-    if conversation_lib.default_conversation.version in ("deepseek_r1", "llava_deepseek_r1"):
+    if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.DEEPSEEK_R1:
         pass
-    if conversation_lib.default_conversation.version in ("qwen_2", "llava_qwen_2"):
+    if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.QWEN_2:
         return preprocess_qwen_2(sources, tokenizer, has_image)
 
     # add end signal and concatenate together
