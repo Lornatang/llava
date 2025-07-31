@@ -13,7 +13,7 @@
 # ==============================================================================
 from pathlib import Path
 from typing import Any, Iterator, List, Optional
-import os
+
 import bitsandbytes
 import torch
 from llava.utils.events import LOGGER
@@ -187,12 +187,6 @@ class LLaVATrainer(Trainer):
 
         return self.optimizer
 
-    def _get_adapter_keys(self):
-        keys = ["mm_projector", "vision_resampler"]
-        if getattr(self.args, "use_im_start_end", False):
-            keys.extend(["embed_tokens", "embed_in"])
-        return keys
-
     def _save_checkpoint(self, model: nn.Module, trial: Any) -> None:
         """Saves a checkpoint during training.
 
@@ -201,24 +195,21 @@ class LLaVATrainer(Trainer):
             trial (Any): Hyperparameter search trial object.
         """
         if getattr(self.args, "tune_mm_mlp_adapter", False):  # finetune.
-            from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
             checkpoint_folder = f"{PREFIX_CHECKPOINT_DIR}-{self.state.global_step}"
+            output_dir = Path(self._get_output_dir(trial=trial), checkpoint_folder)
+            output_dir.mkdir(parents=True, exist_ok=True)
 
-            run_dir = self._get_output_dir(trial=trial)
-            output_dir = os.path.join(run_dir, checkpoint_folder)
-
-            # Only save Adapter
-            keys_to_match = ['mm_projector', 'vision_resampler']
+            keys_to_match = ["mm_projector", "vision_resampler"]
             if getattr(self.args, "use_im_start_end", False):
-                keys_to_match.extend(['embed_tokens', 'embed_in'])
+                keys_to_match.extend(["embed_tokens", "embed_in"])
 
             weight_to_save = get_mm_adapter_state_maybe_zero_3(self.model.named_parameters(), keys_to_match)
 
-            if self.args.local_rank == 0 or self.args.local_rank == -1:
-                self.model.config.save_pretrained(output_dir)
-                torch.save(weight_to_save, os.path.join(output_dir, f'mm_projector.bin'))
-        else: # pretrain.
-            super(LLaVATrainer, self)._save_checkpoint(model, trial)
+            if self.args.local_rank in (-1, 0):
+                self.model.config.save_pretrained(str(output_dir))
+                torch.save(weight_to_save, Path(output_dir, "mm_projector.bin"))
+        else:  # pretrain.
+            super()._save_checkpoint(model, trial)
 
     def _save(self, output_dir: Optional[str] = None, state_dict: Optional[dict] = None) -> None:
         """Saves the model and state dict.

@@ -1119,6 +1119,8 @@ def train(attn_implementation: str = None) -> None:
     else:
         trainer.train()
 
+    trainer.save_state()
+
     model.config.use_cache = True
 
     if training_args.lora_enable:
