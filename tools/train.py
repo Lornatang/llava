@@ -24,18 +24,19 @@ import transformers
 from PIL import Image
 from deepspeed import zero
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from peft.tuners.lora import LoraLayer
+
 from llava import conversation as conversation_lib
 from llava.constants import IGNORE_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.engine.trainer import LLaVATrainer
 from llava.models.llm import LlavaLlamaForCausalLM, LlavaQwen2ForCausalLM
 from llava.utils.ops import convert_expand_to_square, find_all_linear_names, tokenizer_image_token
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from peft.tuners.lora import LoraLayer
 
 local_rank = None
 
 __all__ = [
-    "ModelArguments", "DataArguments", "DataCollatorForSupervisedDataset", "TrainingArguments", "LazySupervisedDataset", "find_all_linear_names",
+    "ModelArguments", "DataArguments", "DataCollatorForSupervisedDataset", "TrainingArguments", "LazySupervisedDataset",
     "get_peft_state_maybe_zero_3", "maybe_zero_3", "make_supervised_data_module", "safe_save_model_for_hf_trainer",
     "smart_tokenizer_and_embedding_resize", "preprocess", "preprocess_multimodal", "preprocess_plain", "preprocess_vicuna_v1", "preprocess_llama2",
     "preprocess_qwen2",
@@ -81,16 +82,13 @@ def _tokenize_fn(strings: Sequence[str], tokenizer: transformers.PreTrainedToken
     )
 
 
-def _mask_targets(target: torch.Tensor, tokenized_lens: List[int], speakers: List[str]) -> torch.Tensor:
+def _mask_targets(target: torch.Tensor, tokenized_lens: List[int], speakers: List[str]) -> None:
     """Mask the targets based on tokenized lengths and speakers.
 
     Args:
         target (torch.Tensor): The target tensor to be masked.
         tokenized_lens (List[int]): A list of tokenized lengths for each round.
         speakers (List[str]): A list of speakers corresponding to each round.
-
-    Returns:
-        None: The function modifies the target tensor in place.
     """
     cur_idx = tokenized_lens[0]
     tokenized_lens = tokenized_lens[1:]
@@ -132,6 +130,7 @@ def _add_speaker_and_signal(header: str, source: List, get_conversation: bool = 
 
 @dataclass
 class ModelArguments:
+    """Arguments pertaining to which model/config/tokenizer we are going to fine-tune from."""
     model_name_or_path: Optional[str] = field(default="lmsys/vicuna-13b-v1.5")
     version: Optional[str] = field(default="vicuna_v1")
     freeze_backbone: bool = field(default=False)
@@ -148,6 +147,7 @@ class ModelArguments:
 
 @dataclass
 class DataArguments:
+    """Arguments pertaining to the data we are going to use for training and evaluation."""
     data_path: str = field(default=None, metadata={"help": "Path to the training data."})
     lazy_preprocess: bool = False
     is_multimodal: bool = False
@@ -191,6 +191,7 @@ class DataCollatorForSupervisedDataset(object):
 
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):
+    """Arguments pertaining to the training process."""
     cache_dir: Optional[str] = field(default=None)
     optim: str = field(default="adamw_torch")
     remove_unused_columns: bool = field(default=False)

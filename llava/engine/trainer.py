@@ -11,15 +11,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-from pathlib import Path
-from typing import Any, Iterator, List, Optional
+from typing import Any, Optional
 
 import bitsandbytes
 import torch
-from llava.utils.events import LOGGER
-from llava.utils.ops import get_length_grouped_indices, get_mm_length_grouped_indices, get_mm_adapter_state_maybe_zero_3
 from torch import nn
-from torch.utils.data import Sampler
 from transformers import Trainer
 from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
 from transformers.trainer import (
@@ -27,62 +23,13 @@ from transformers.trainer import (
     get_parameter_names,
     has_length,
 )
-from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
-import os
+
+from llava.data.utils import LengthGroupedSampler
+from llava.utils.events import LOGGER
+
 __all__ = [
-    "LengthGroupedSampler", "LLaVATrainer",
+    "LLaVATrainer",
 ]
-
-
-class LengthGroupedSampler(Sampler):
-    """Sampler that groups samples by length or modality."""
-
-    def __init__(
-            self,
-            batch_size: int,
-            world_size: int,
-            lengths: Optional[List[int]] = None,
-            generator: Optional[torch.Generator] = None,
-            group_by_modality: bool = False,
-    ) -> None:
-        """Initializes a sampler that groups samples by length or modality.
-
-        Args:
-            batch_size (int): Batch size.
-            world_size (int): Number of distributed workers.
-            lengths (Optional[List[int]]): List of sample lengths.
-            generator (Optional[torch.Generator], optional): Random generator. Defaults to ``None``.
-            group_by_modality (bool, optional): Whether to group by modality. Defaults to ``False``.
-        """
-        super().__init__()
-        if lengths is None:
-            raise ValueError("Lengths must be provided.")
-
-        self.batch_size: int = batch_size
-        self.world_size: int = world_size
-        self.lengths: Optional[List[int]] = lengths
-        self.generator: Optional[torch.Generator] = generator
-        self.group_by_modality: bool = group_by_modality
-
-    def __len__(self) -> int:
-        """Returns the number of samples.
-
-        Returns:
-            int: Number of samples.
-        """
-        return len(self.lengths)
-
-    def __iter__(self) -> Iterator[List[Any]]:
-        """Yields indices for sampling.
-
-        Returns:
-            Iterator[List[Any]]: Iterator over sample indices.
-        """
-        if self.group_by_modality:
-            indices = get_mm_length_grouped_indices(self.lengths, self.batch_size, self.world_size, generator=self.generator)
-        else:
-            indices = get_length_grouped_indices(self.lengths, self.batch_size, self.world_size, generator=self.generator)
-        return iter(indices)
 
 
 class LLaVATrainer(Trainer):
