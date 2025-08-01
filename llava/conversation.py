@@ -22,8 +22,8 @@ from llava.utils.ops import convert_expand_to_square
 
 __all__ = [
     "SeparatorStyle", "Conversation",
-    "conv_llava_plain", "conv_llava_vicuna_v1", "conv_llava_vicuna_v1_mmtag", "conv_llava_llama", "conv_llava_deepseek_v3", "conv_vicuna_v1",
-    "conv_llama", "conv_deepseek_v3", "conv_templates", "default_conversation",
+    "conv_llava_plain", "conv_llava_vicuna_v1", "conv_llava_vicuna_v1_mmtag", "conv_llava_llama", "conv_vicuna_v1", "conv_llama", "conv_templates",
+    "default_conversation",
 ]
 
 
@@ -32,7 +32,6 @@ class SeparatorStyle(Enum):
     PLAIN = auto()  # Text style.
     VICUNA_V1 = auto()  # Vicuna-V1 style.
     LLAMA = auto()  # Llama style.
-    DEEPSEEK_V3 = auto()  # DeepSeek-V3 style.
     QWEN2 = auto()  # Qwen2 style.
 
 
@@ -80,7 +79,7 @@ class Conversation:
         if self.sep_style == SeparatorStyle.PLAIN:  # Text style.
             seps = [self.sep, self.sep2]
             ret = self.system_message
-            
+
             for i, (role, message) in enumerate(messages):
                 if message:
                     if type(message) is tuple:
@@ -91,7 +90,7 @@ class Conversation:
         elif self.sep_style == SeparatorStyle.VICUNA_V1:  # Vicuna-V1 style.
             seps = [self.sep, self.sep2]
             ret = self.system_message + seps[0]
-            
+
             for i, (role, message) in enumerate(messages):
                 if message:
                     if type(message) is tuple:
@@ -120,20 +119,10 @@ class Conversation:
                 else:
                     ret += ""
             ret = ret.lstrip(self.sep)
-        elif self.sep_style == SeparatorStyle.DEEPSEEK_V3:  # DeepSeek-V3 style.
-            seps = [self.sep, self.sep2]
-            ret = ""
-            
-            for i, (role, message) in enumerate(self.messages):
-                if message:
-                    ret += role + ": " + message + seps[i % 2]
-                else:
-                    ret += role + ":"
-            return ret
         elif self.sep_style == SeparatorStyle.QWEN2:  # Qwen2 style.
             seps = [self.sep, self.sep2]
             ret = self.system_message + seps[0]
-            
+
             for i, (role, message) in enumerate(messages):
                 if message:
                     if type(message) is tuple:
@@ -339,18 +328,6 @@ conv_llava_llama = Conversation(
     skip_next=False,
     version="llava_llama",
 )
-conv_llava_deepseek_v3 = Conversation(
-    system_message="<｜begin▁of▁sentence｜>",
-    roles=("USER", "ASSISTANT"),
-    messages=(),
-    offset=0,
-    sep_style=SeparatorStyle.DEEPSEEK_V3,
-    sep="\n\n",
-    sep2="<｜end▁of▁sentence｜>",
-    stop_str="<｜end▁of▁sentence｜>",
-    skip_next=False,
-    version="llava_deepseek_v3",
-)
 conv_llava_qwen2 = Conversation(
     system_message="A chat between a curious user and an artificial intelligence assistant. "
                    "The assistant gives helpful, detailed, and polite answers to the user's questions.",
@@ -393,18 +370,6 @@ conv_llama = Conversation(
     skip_next=False,
     version="llama",
 )
-conv_deepseek_v3 = Conversation(
-    system_message="<｜begin▁of▁sentence｜>",
-    roles=("USER", "ASSISTANT"),
-    messages=(),
-    offset=0,
-    sep_style=SeparatorStyle.DEEPSEEK_V3,
-    sep="\n\n",
-    sep2="<｜end▁of▁sentence｜>",
-    stop_str="<｜end▁of▁sentence｜>",
-    skip_next=False,
-    version="deepseek_v3",
-)
 conv_qwen2 = Conversation(
     system_message="A chat between a curious user and an artificial intelligence assistant. "
                    "The assistant gives helpful, detailed, and polite answers to the user's questions.",
@@ -425,13 +390,11 @@ conv_templates = {
     "llava_vicuna_v1": conv_llava_vicuna_v1,
     "llava_vicuna_v1_mmtag": conv_llava_vicuna_v1_mmtag,
     "llava_llama": conv_llava_llama,
-    "llava_deepseek_v3": conv_llava_deepseek_v3,
     "llava_qwen2": conv_llava_qwen2,
 
     # finetune.
     "vicuna_v1": conv_vicuna_v1,
     "llama": conv_llama,
-    "deepseek_v3": conv_deepseek_v3,
     "qwen2": conv_qwen2,
 }
 default_conversation = conv_templates["vicuna_v1"]

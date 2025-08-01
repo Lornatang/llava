@@ -11,6 +11,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-from .deepseek_v3 import LlavaDeepseekV3Config, LlavaDeepseekV3Model, LlavaDeepseekV3ForCausalLM
 from .llama import LlavaLlamaConfig, LlavaLlamaModel, LlavaLlamaForCausalLM
 from .qwen2 import LlavaQwen2Config, LlavaQwen2Model, LlavaQwen2ForCausalLM

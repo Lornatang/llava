@@ -14,7 +14,6 @@
 import copy
 import json
 import logging
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
@@ -28,7 +27,7 @@ from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 from llava import conversation as conversation_lib
 from llava.constants import IGNORE_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.engine.trainer import LLaVATrainer
-from llava.models.llm import LlavaDeepseekV3ForCausalLM, LlavaLlamaForCausalLM, LlavaQwen2ForCausalLM
+from llava.models.llm import LlavaLlamaForCausalLM, LlavaQwen2ForCausalLM
 from llava.utils.ops import convert_expand_to_square, find_all_linear_names, tokenizer_image_token
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from peft.tuners.lora import LoraLayer
@@ -39,7 +38,7 @@ __all__ = [
     "ModelArguments", "DataArguments", "DataCollatorForSupervisedDataset", "TrainingArguments", "LazySupervisedDataset", "find_all_linear_names",
     "get_peft_state_maybe_zero_3", "maybe_zero_3", "make_supervised_data_module", "safe_save_model_for_hf_trainer",
     "smart_tokenizer_and_embedding_resize", "preprocess", "preprocess_multimodal", "preprocess_plain", "preprocess_vicuna_v1", "preprocess_llama2",
-    "preprocess_deepseek_v3", "preprocess_qwen2",
+    "preprocess_qwen2",
 ]
 
 
@@ -527,8 +526,6 @@ def preprocess(
         return preprocess_vicuna_v1(sources, tokenizer, has_image)
     if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.LLAMA:
         return preprocess_llama2(sources, tokenizer, has_image)
-    if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.DEEPSEEK_V3:
-        return preprocess_deepseek_v3(sources, tokenizer, has_image)
     if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.QWEN2:
         return preprocess_qwen2(sources, tokenizer, has_image)
 
@@ -680,7 +677,7 @@ def preprocess_vicuna_v1(
 
     assert conv.sep_style == conversation_lib.SeparatorStyle.VICUNA_V1
 
-    # Mask targets.
+    # Mask targets: mask everything except assistant responses.
     sep = conv.sep + conv.roles[1] + ": "
     for conversation, target in zip(conversations, targets):
         total_len = int(target.ne(tokenizer.pad_token_id).sum())
@@ -772,7 +769,7 @@ def preprocess_llama2(
 
     assert conv.sep_style == conversation_lib.SeparatorStyle.LLAMA
 
-    # Mask targets.
+    # Mask targets: mask everything except assistant responses.
     sep = "[/INST] "
     for conversation, target in zip(conversations, targets):
         total_len = int(target.ne(tokenizer.pad_token_id).sum())
@@ -803,103 +800,6 @@ def preprocess_llama2(
 
         if cur_len < tokenizer.model_max_length:
             if cur_len != total_len:
-                target[:] = IGNORE_INDEX
-                print(f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}. (ignored)")
-
-    return dict(
-        input_ids=input_ids,
-        labels=targets,
-    )
-
-
-# TODO: Maybe implement error.
-def preprocess_deepseek_v3(
-        sources: Dict[str, List[Dict[str, str]]],
-        tokenizer: transformers.PreTrainedTokenizer,
-        has_image: bool = False,
-) -> Dict[str, List[Dict[str, str]]]:
-    """Preprocess conversations in DeepSeek-R1 style.
-
-    Args:
-        sources (Dict[str, List[Dict[str, str]]]): A list of conversations, each conversation is a list of sentences.
-        tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use for tokenization.
-        has_image (bool): Whether the conversations contain images.
-
-    Returns:
-        Dict[str, List[Dict[str, str]]]: A dictionary containing the tokenized input IDs and labels.
-    """
-    conv = conversation_lib.default_conversation.copy()
-    roles = {"human": conv.roles[0], "gpt": conv.roles[1]}
-
-    # Apply prompt templates.
-    conversations = []
-    for i, source in enumerate(sources):
-        # Skip the first one if it is not from human.
-        if roles[source[0]["from"]] != conv.roles[0]:
-            source = source[1:]
-
-        conv.messages = []
-        for j, sentence in enumerate(source):
-            role = roles[sentence["from"]]
-            assert role == conv.roles[j % 2], f"{i}"
-            conv.append_message(role, sentence["value"])
-        conversations.append(conv.get_prompt())
-
-    # Tokenize conversations.
-    if has_image:
-        input_ids = torch.stack(
-            [tokenizer_image_token(prompt, tokenizer, return_tensors='pt') for prompt in conversations], dim=0)
-    else:
-        input_ids = tokenizer(
-            conversations,
-            return_tensors="pt",
-            padding="longest",
-            max_length=tokenizer.model_max_length,
-            truncation=True,
-        ).input_ids
-
-    targets = input_ids.clone()
-
-    assert conv.sep_style == conversation_lib.SeparatorStyle.DEEPSEEK
-
-    # Mask targets.
-    sep = conv.roles[1] + ": "
-    for conversation, target in zip(conversations, targets):
-        total_len = int(target.ne(tokenizer.pad_token_id).sum())
-        rounds = conversation.split(conv.sep2)
-        rounds_len = len(rounds)
-        cur_len = 0
-        for i, rou in enumerate(rounds):
-            if rou == "":
-                break
-
-            parts = rou.split(sep)
-            if len(parts) != 2:
-                break
-            parts[0] += sep
-
-            if has_image:
-                round_ids = tokenizer_image_token(rou, tokenizer)
-                instruction_ids = tokenizer_image_token(parts[0], tokenizer)
-            else:
-                round_ids = tokenizer(rou).input_ids
-                instruction_ids = tokenizer(parts[0]).input_ids
-
-            equal_parts = [x == y for x, y in zip(round_ids, instruction_ids)]
-            instruction_len = equal_parts.index(False) if False in equal_parts else len(equal_parts)
-            round_len = len(round_ids)
-
-            if i != 0 and not tokenizer.legacy:
-                round_len += 1
-                instruction_len += 1
-
-            target[cur_len: cur_len + instruction_len] = IGNORE_INDEX
-            cur_len += round_len
-
-        target[cur_len:] = IGNORE_INDEX
-
-        if cur_len < tokenizer.model_max_length:
-            if cur_len != total_len + rounds_len - 2:
                 target[:] = IGNORE_INDEX
                 print(f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}. (ignored)")
 
@@ -943,7 +843,7 @@ def preprocess_qwen2(
 
     # Tokenize conversations.
     if has_image:
-        input_ids = torch.stack([tokenizer_image_token(prompt, tokenizer, return_tensors='pt') for prompt in conversations], dim=0)
+        input_ids = torch.stack([tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations], dim=0)
     else:
         input_ids = tokenizer(
             conversations,
@@ -957,7 +857,7 @@ def preprocess_qwen2(
 
     assert conv.sep_style == conversation_lib.SeparatorStyle.QWEN2
 
-    # Mask targets.
+    # Mask targets: mask everything except assistant responses.
     sep = conv.sep + conv.roles[1] + ": "
     for conversation, target in zip(conversations, targets):
         total_len = int(target.ne(tokenizer.pad_token_id).sum())
@@ -1043,16 +943,7 @@ def train(attn_implementation: str = None) -> None:
         )
 
     if model_args.vision_tower is not None:
-        if re.search(r"DeepSeek-(?:R1|V3)", model_args.model_name_or_path):
-            model = LlavaDeepseekV3ForCausalLM.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                local_files_only=True,
-                attn_implementation=attn_implementation,
-                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                **bnb_model_from_pretrained_args
-            )
-        elif "Qwen2" in model_args.model_name_or_path:
+        if "Qwen2" in model_args.model_name_or_path:
             model = LlavaQwen2ForCausalLM.from_pretrained(
                 model_args.model_name_or_path,
                 cache_dir=training_args.cache_dir,
@@ -1071,16 +962,7 @@ def train(attn_implementation: str = None) -> None:
                 **bnb_model_from_pretrained_args
             )
     else:
-        if re.search(r"DeepSeek-(?:R1|V3)", model_args.model_name_or_path):
-            model = transformers.DeepseekV3ForCausalLM.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                local_files_only=True,
-                attn_implementation=attn_implementation,
-                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                **bnb_model_from_pretrained_args
-            )
-        elif "Qwen2" in model_args.model_name_or_path:
+        if "Qwen2" in model_args.model_name_or_path:
             model = transformers.Qwen2ForCausalLM.from_pretrained(
                 model_args.model_name_or_path,
                 cache_dir=training_args.cache_dir,
