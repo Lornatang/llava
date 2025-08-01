@@ -13,3 +13,4 @@
 # ==============================================================================
 from .events import LOGGER
 from .ops import *  # noqa
+from .torch_utils import *  # noqa

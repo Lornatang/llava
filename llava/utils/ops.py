@@ -22,10 +22,11 @@ import transformers
 from PIL import Image
 from deepspeed import zero
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
+
 from llava.constants import IMAGE_TOKEN_INDEX
 
 __all__ = [
-    "convert_expand_to_square", "divide_to_patches", "find_all_linear_names", "load_image_from_base64", "get_anyres_image_grid_shape",
+    "convert_expand_to_square", "divide_to_patches", "find_all_linear_names", "load_image", "load_image_from_base64", "get_anyres_image_grid_shape",
     "get_length_grouped_indices", "get_model_name_from_path", "get_mm_length_grouped_indices", "get_mm_adapter_state_maybe_zero_3", "maybe_zero_3",
     "process_anyres_image", "process_images", "resize_and_pad_image", "select_best_resolution", "tokenizer_image_token", "unpad_image",
 ]
@@ -97,6 +98,31 @@ def find_all_linear_names(model: transformers.PreTrainedModel) -> List[str]:
     if "lm_head" in lora_module_names:  # needed for 16-bit
         lora_module_names.remove("lm_head")
     return list(lora_module_names)
+
+
+def load_image(image_file) -> Image.Image:
+    """Load an image from a local file path or a URL.
+
+    Args:
+        image_file (str): Path to the image file or a URL.
+
+    Returns:
+        Image.Image: Loaded image in RGB mode.
+
+    Raises:
+        IOError: If the image cannot be opened.
+        requests.RequestException: If the image URL cannot be fetched.
+    """
+    try:
+        if image_file.startswith(("http://", "https://")):
+            response = requests.get(image_file)
+            response.raise_for_status()
+            image = Image.open(BytesIO(response.content))
+        else:
+            image = Image.open(image_file)
+        return image.convert("RGB")
+    except Exception as e:
+        raise IOError(f"Failed to load image from {image_file}: {e}")
 
 
 def load_image_from_base64(image: str) -> Image.Image:
