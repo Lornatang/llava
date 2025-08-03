@@ -15,8 +15,9 @@ import ast
 import base64
 import math
 from io import BytesIO
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
+import requests
 import torch
 import transformers
 from PIL import Image
@@ -27,8 +28,10 @@ from llava.constants import IMAGE_TOKEN_INDEX
 
 __all__ = [
     "convert_expand_to_square", "divide_to_patches", "find_all_linear_names", "load_image", "load_image_from_base64", "get_anyres_image_grid_shape",
-    "get_length_grouped_indices", "get_model_name_from_path", "get_mm_length_grouped_indices", "get_mm_adapter_state_maybe_zero_3", "maybe_zero_3",
-    "process_anyres_image", "process_images", "resize_and_pad_image", "select_best_resolution", "tokenizer_image_token", "unpad_image",
+    "get_length_grouped_indices", "get_model_name_from_path", "get_peft_state_maybe_zero_3", "get_peft_state_non_lora_maybe_zero_3",
+    "get_mm_length_grouped_indices",
+    "get_mm_adapter_state_maybe_zero_3", "maybe_zero_3", "process_anyres_image", "process_images", "resize_and_pad_image", "select_best_resolution",
+    "tokenizer_image_token", "unpad_image",
 ]
 
 
@@ -205,6 +208,61 @@ def get_model_name_from_path(model_path: str) -> str:
         return model_paths[-2] + "_" + model_paths[-1]
     else:
         return model_paths[-1]
+
+
+def get_peft_state_maybe_zero_3(named_params: Iterable, bias: str) -> Dict[str, torch.Tensor]:
+    """Collects LoRA and/or bias parameters from named parameters, handling DeepSpeed Zero3 if needed.
+
+    Args:
+        named_params (Iterable): Iterable of (name, parameter) tuples from the model.
+        bias (str): Which bias parameters to include. Options:
+            - "none": Only LoRA parameters.
+            - "all": LoRA and all bias parameters.
+            - "lora_only": LoRA parameters and their corresponding bias.
+
+    Returns:
+        Dict[str, torch.Tensor]: A dictionary mapping parameter names to (possibly gathered) tensors.
+    """
+    if bias == "none":
+        to_return = {k: t for k, t in named_params if "lora_" in k}
+    elif bias == "all":
+        to_return = {k: t for k, t in named_params if "lora_" in k or "bias" in k}
+    elif bias == "lora_only":
+        to_return = {}
+        maybe_lora_bias = {}
+        lora_bias_names = set()
+        bias_name = None
+        for k, t in named_params:
+            if "lora_" in k:
+                to_return[k] = t
+                bias_name = k.split("lora_")[0] + "bias"
+                lora_bias_names.add(bias_name)
+            elif "bias" in k:
+                maybe_lora_bias[k] = t
+        for k, t in maybe_lora_bias:
+            if bias_name in lora_bias_names:
+                to_return[bias_name] = t
+    else:
+        raise NotImplementedError
+    to_return = {k: maybe_zero_3(v, ignore_status=True) for k, v in to_return.items()}
+    return to_return
+
+
+def get_peft_state_non_lora_maybe_zero_3(named_params: Iterable, require_grad_only: bool = True) -> Dict[str, torch.Tensor]:
+    """Collects non-LoRA parameters from named parameters, handling DeepSpeed Zero3 if needed.
+
+    Args:
+        named_params (Iterable): Iterable of (name, parameter) tuples from the model.
+        require_grad_only (bool): If True, only include parameters that require gradients.
+
+    Returns:
+        Dict[str, torch.Tensor]: A dictionary mapping parameter names to (possibly gathered) tensors.
+    """
+    to_return = {k: t for k, t in named_params if "lora_" not in k}
+    if require_grad_only:
+        to_return = {k: t for k, t in to_return.items() if t.requires_grad}
+    to_return = {k: maybe_zero_3(v, ignore_status=True).cpu() for k, v in to_return.items()}
+    return to_return
 
 
 def get_mm_length_grouped_indices(

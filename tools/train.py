@@ -13,17 +13,14 @@
 # ==============================================================================
 import copy
 import json
-import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 
 import torch
 import torch.utils.data
 import transformers
 from PIL import Image
-from deepspeed import zero
-from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from peft.tuners.lora import LoraLayer
 
@@ -31,16 +28,13 @@ from llava import conversation as conversation_lib
 from llava.constants import IGNORE_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.engine.trainer import LLaVATrainer
 from llava.models.llm import LlavaLlamaForCausalLM, LlavaQwen2ForCausalLM
-from llava.utils.ops import convert_expand_to_square, find_all_linear_names, tokenizer_image_token
+from llava.utils.checkpoint import safe_save_model_for_hf_trainer
+from llava.utils.ops import (
+    convert_expand_to_square, find_all_linear_names, get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3,
+    tokenizer_image_token,
+)
 
 local_rank = None
-
-__all__ = [
-    "ModelArguments", "DataArguments", "DataCollatorForSupervisedDataset", "TrainingArguments", "LazySupervisedDataset",
-    "get_peft_state_maybe_zero_3", "maybe_zero_3", "make_supervised_data_module", "safe_save_model_for_hf_trainer",
-    "smart_tokenizer_and_embedding_resize", "preprocess", "preprocess_multimodal", "preprocess_plain", "preprocess_vicuna_v1", "preprocess_llama2",
-    "preprocess_qwen2",
-]
 
 
 def _rank0_print(*args) -> None:
@@ -325,97 +319,6 @@ class LazySupervisedDataset(torch.utils.data.Dataset):
         return length_list
 
 
-def get_peft_state_maybe_zero_3(named_params: Iterable, bias: str) -> Dict[str, torch.Tensor]:
-    """Collects LoRA and/or bias parameters from named parameters, handling DeepSpeed Zero3 if needed.
-
-    Args:
-        named_params (Iterable): Iterable of (name, parameter) tuples from the model.
-        bias (str): Which bias parameters to include. Options:
-            - "none": Only LoRA parameters.
-            - "all": LoRA and all bias parameters.
-            - "lora_only": LoRA parameters and their corresponding bias.
-
-    Returns:
-        Dict[str, torch.Tensor]: A dictionary mapping parameter names to (possibly gathered) tensors.
-    """
-    if bias == "none":
-        to_return = {k: t for k, t in named_params if "lora_" in k}
-    elif bias == "all":
-        to_return = {k: t for k, t in named_params if "lora_" in k or "bias" in k}
-    elif bias == "lora_only":
-        to_return = {}
-        maybe_lora_bias = {}
-        lora_bias_names = set()
-        bias_name = None
-        for k, t in named_params:
-            if "lora_" in k:
-                to_return[k] = t
-                bias_name = k.split("lora_")[0] + "bias"
-                lora_bias_names.add(bias_name)
-            elif "bias" in k:
-                maybe_lora_bias[k] = t
-        for k, t in maybe_lora_bias:
-            if bias_name in lora_bias_names:
-                to_return[bias_name] = t
-    else:
-        raise NotImplementedError
-    to_return = {k: maybe_zero_3(v, ignore_status=True) for k, v in to_return.items()}
-    return to_return
-
-
-def get_peft_state_non_lora_maybe_zero_3(named_params: Iterable, require_grad_only: bool = True) -> Dict[str, torch.Tensor]:
-    """Collects non-LoRA parameters from named parameters, handling DeepSpeed Zero3 if needed.
-
-    Args:
-        named_params (Iterable): Iterable of (name, parameter) tuples from the model.
-        require_grad_only (bool): If True, only include parameters that require gradients.
-
-    Returns:
-        Dict[str, torch.Tensor]: A dictionary mapping parameter names to (possibly gathered) tensors.
-    """
-    to_return = {k: t for k, t in named_params if "lora_" not in k}
-    if require_grad_only:
-        to_return = {k: t for k, t in to_return.items() if t.requires_grad}
-    to_return = {k: maybe_zero_3(v, ignore_status=True).cpu() for k, v in to_return.items()}
-    return to_return
-
-
-def get_mm_adapter_state_maybe_zero_3(named_params: Iterable, keys_to_match: Optional[List[str]] = None) -> Dict[str, torch.Tensor]:
-    """Collects multimodal adapter parameters from named parameters, handling DeepSpeed Zero3 if needed.
-
-    Args:
-        named_params (Iterable): Iterable of (name, parameter) tuples from the model.
-        keys_to_match (Optional[List[str]]): List of substrings to match in parameter names. If None, all parameters are returned.
-
-    Returns:
-        Dict[str, torch.Tensor]: A dictionary mapping parameter names to (possibly gathered) tensors.
-    """
-    to_return = {k: t for k, t in named_params if any(key_match in k for key_match in keys_to_match)}
-    to_return = {k: maybe_zero_3(v, ignore_status=True).cpu() for k, v in to_return.items()}
-    return to_return
-
-
-def maybe_zero_3(param: torch.nn.Parameter, ignore_status: bool = False) -> torch.Tensor:
-    """Handles DeepSpeed Zero3 parameters.
-
-    Args:
-        param (torch.nn.Parameter): The parameter to process.
-        ignore_status (bool): If True, ignores the ZeroParamStatus check.
-
-    Returns:
-        torch.Tensor: The processed parameter tensor, detached and moved to CPU.
-    """
-    if hasattr(param, "ds_id"):
-        if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
-            if not ignore_status:
-                logging.warning(f"{name}: param.ds_status != ZeroParamStatus.NOT_AVAILABLE: {param.ds_status}")
-        with zero.GatheredParameters([param]):
-            param = param.data.detach().cpu().clone()
-    else:
-        param = param.detach().cpu().clone()
-    return param
-
-
 def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, data_args: DataArguments) -> Dict[str, torch.utils.data.Dataset]:
     """Create a dataset and collator for supervised fine-tuning.
 
@@ -433,77 +336,6 @@ def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, dat
         eval_dataset=None,
         data_collator=data_collator,
     )
-
-
-def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str) -> None:
-    """Collects the state dict and dump to disk.
-
-    Args:
-        trainer (transformers.Trainer): The trainer instance.
-        output_dir (str): The directory where the model should be saved.
-    """
-    output_path = Path(output_dir)
-
-    if getattr(trainer.args, "tune_mm_mlp_adapter", False):
-        # Only save Adapter
-        keys_to_match = ["mm_projector"]
-        if getattr(trainer.args, "use_im_start_end", False):
-            keys_to_match.extend(["embed_tokens", "embed_in"])
-
-        weight_to_save = get_mm_adapter_state_maybe_zero_3(trainer.model.named_parameters(), keys_to_match)
-        trainer.model.config.save_pretrained(output_dir)
-
-        output_name = output_path.name
-        if trainer.args.local_rank == 0 or trainer.args.local_rank == -1:
-            if output_name.startswith("checkpoint-"):
-                mm_projector_folder = Path(output_path.parent, "mm_projector")
-                mm_projector_folder.mkdir(parents=True, exist_ok=True)
-                save_path = Path(mm_projector_folder, f"{output_name}.bin")
-                torch.save(weight_to_save, save_path)
-            else:
-                save_path = Path(output_path, "mm_projector.bin")
-                torch.save(weight_to_save, save_path)
-        return
-
-    if trainer.deepspeed:
-        torch.cuda.synchronize()
-        trainer.save_model(output_dir)
-        return
-
-    state_dict = trainer.model.state_dict()
-    if trainer.args.should_save:
-        cpu_state_dict = {
-            key: value.cpu()
-            for key, value in state_dict.items()
-        }
-        del state_dict
-        trainer._save(output_dir, state_dict=cpu_state_dict)  # noqa
-
-
-def smart_tokenizer_and_embedding_resize(
-        special_tokens_dict: Dict,
-        tokenizer: transformers.PreTrainedTokenizer,
-        model: transformers.PreTrainedModel,
-) -> None:
-    """Resize tokenizer and embedding.
-
-    Args:
-        special_tokens_dict (Dict): A dictionary of special tokens to be added to the tokenizer.
-        tokenizer (transformers.PreTrainedTokenizer): The tokenizer to resize.
-        model (transformers.PreTrainedModel): The model whose embeddings will be resized.
-    """
-    num_new_tokens = tokenizer.add_special_tokens(special_tokens_dict)
-    model.resize_token_embeddings(len(tokenizer))
-
-    if num_new_tokens > 0:
-        input_embeddings = model.get_input_embeddings().weight.data
-        output_embeddings = model.get_output_embeddings().weight.data
-
-        input_embeddings_avg = input_embeddings[:-num_new_tokens].mean(dim=0, keepdim=True)
-        output_embeddings_avg = output_embeddings[:-num_new_tokens].mean(dim=0, keepdim=True)
-
-        input_embeddings[-num_new_tokens:] = input_embeddings_avg
-        output_embeddings[-num_new_tokens:] = output_embeddings_avg
 
 
 def preprocess(
@@ -535,7 +367,7 @@ def preprocess(
     header = None
     for source in sources:
         header = f"{conversation_lib.default_conversation.system_message}\n\n"
-        conversation = _add_speaker_and_signal(header, source, version)
+        conversation = _add_speaker_and_signal(header, source)
         conversations.append(conversation)
 
     # tokenize conversations

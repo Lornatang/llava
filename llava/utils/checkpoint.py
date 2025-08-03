@@ -11,16 +11,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
+from pathlib import Path
 from typing import Any, Tuple
 
 import torch
+import transformers
 from transformers import AutoTokenizer
 
 from llava.constants import DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.models.llm import LlavaLlamaForCausalLM, LlavaQwen2ForCausalLM
+from .ops import get_mm_adapter_state_maybe_zero_3
 
 __all__ = [
-    "load_pretrained",
+    "load_pretrained", "safe_save_model_for_hf_trainer",
 ]
 
 
@@ -75,3 +78,48 @@ def load_pretrained(
     image_processor = vision_tower.image_processor
 
     return tokenizer, model, image_processor
+
+
+def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str) -> None:
+    """Collects the state dict and dump to disk.
+
+    Args:
+        trainer (transformers.Trainer): The trainer instance.
+        output_dir (str): The directory where the model should be saved.
+    """
+    output_path = Path(output_dir)
+
+    if getattr(trainer.args, "tune_mm_mlp_adapter", False):
+        # Only save Adapter
+        keys_to_match = ["mm_projector"]
+        if getattr(trainer.args, "use_im_start_end", False):
+            keys_to_match.extend(["embed_tokens", "embed_in"])
+
+        weight_to_save = get_mm_adapter_state_maybe_zero_3(trainer.model.named_parameters(), keys_to_match)
+        trainer.model.config.save_pretrained(output_dir)
+
+        output_name = output_path.name
+        if trainer.args.local_rank == 0 or trainer.args.local_rank == -1:
+            if output_name.startswith("checkpoint-"):
+                mm_projector_folder = Path(output_path.parent, "mm_projector")
+                mm_projector_folder.mkdir(parents=True, exist_ok=True)
+                save_path = Path(mm_projector_folder, f"{output_name}.bin")
+                torch.save(weight_to_save, save_path)
+            else:
+                save_path = Path(output_path, "mm_projector.bin")
+                torch.save(weight_to_save, save_path)
+        return
+
+    if trainer.deepspeed:
+        torch.cuda.synchronize()
+        trainer.save_model(output_dir)
+        return
+
+    state_dict = trainer.model.state_dict()
+    if trainer.args.should_save:
+        cpu_state_dict = {
+            key: value.cpu()
+            for key, value in state_dict.items()
+        }
+        del state_dict
+        trainer._save(output_dir, state_dict=cpu_state_dict)  # noqa

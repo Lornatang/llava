@@ -11,6 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
+from .checkpoint import *  # noqa
 from .events import LOGGER
 from .ops import *  # noqa
 from .torch_utils import *  # noqa

@@ -15,7 +15,7 @@ import base64
 import dataclasses
 from enum import auto, Enum
 from io import BytesIO
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from PIL import Image
 
@@ -40,13 +40,13 @@ class SeparatorStyle(Enum):
 class Conversation:
     """Class representing a conversation with a system prompt, roles, and messages."""
     system_message: str = ""
-    roles: Tuple[str] = ("USER", "ASSISTANT")
-    messages: List[List[str]] = ()
+    roles: Tuple[str, str] = ("USER", "ASSISTANT")
+    messages: Any = ()
     offset: int = 0
     sep_style: SeparatorStyle = SeparatorStyle.VICUNA_V1
-    sep: str = "###"
-    sep2: str = None
-    stop_str: Union[str, List[str]] = None
+    sep: Optional[str] = "###"
+    sep2: Optional[str] = None
+    stop_str: Optional[Union[str, List[str]]] = None
     skip_next: bool = False
     version: str = "Unknown"
 
@@ -88,7 +88,7 @@ class Conversation:
                     ret += message + seps[i % 2]
                 else:
                     ret += ""
-        elif self.sep_style == SeparatorStyle.VICUNA_V1:  # Vicuna-V1 style.
+        elif self.sep_style in (SeparatorStyle.VICUNA_V1, SeparatorStyle.QWEN2):  # Vicuna-V1/Qwen2 style.
             seps = [self.sep, self.sep2]
             ret = self.system_message + seps[0]
 
@@ -120,16 +120,6 @@ class Conversation:
                 else:
                     ret += ""
             ret = ret.lstrip(self.sep)
-        elif self.sep_style == SeparatorStyle.QWEN2:  # Qwen2 style.
-            seps = [self.sep, self.sep2]
-            ret = self.system_message + seps[0]
-            for i, (role, message) in enumerate(messages):
-                if message:
-                    if type(message) is tuple:
-                        message, _, _ = message
-                    ret += role + ": " + message + seps[i % 2]
-                else:
-                    ret += role + ":"
         else:
             raise ValueError(f"Invalid style: {self.sep_style}")
 
@@ -176,7 +166,7 @@ class Conversation:
             Union[str, PIL.Image.Image]: Base64 string if return_pil is False, otherwise PIL image.
         """
         if image_process_mode == "Pad":
-            image = convert_expand_to_square(image)
+            image = convert_expand_to_square(image, background_color=(114, 114, 114))
         elif image_process_mode in ["Default", "Crop"]:
             pass
         elif image_process_mode == "Resize":
