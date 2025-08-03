@@ -44,7 +44,7 @@ class Conversation:
     messages: Any = ()
     offset: int = 0
     sep_style: SeparatorStyle = SeparatorStyle.VICUNA_V1
-    sep: Optional[str] = "###"
+    sep: Optional[str] = None
     sep2: Optional[str] = None
     stop_str: Optional[Union[str, List[str]]] = None
     skip_next: bool = False
@@ -348,13 +348,13 @@ conv_llama = Conversation(
     version="llama",
 )
 conv_qwen2 = Conversation(
-    system_message="A chat between a curious user and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user's questions.",
-    roles=("USER", "ASSISTANT"),
+    system_message="<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
+    roles=("<|im_start|>user", "<|im_start|>assistant"),
     messages=(),
     offset=0,
     sep_style=SeparatorStyle.QWEN2,
-    sep=" ",
-    sep2="<|endoftext|>",
+    sep="<|im_end|>",
+    sep2=None,
     stop_str=None,
     skip_next=False,
     version="qwen2",
