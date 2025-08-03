@@ -18,6 +18,7 @@ from io import BytesIO
 from typing import Any, Dict, List, Tuple, Union
 
 from PIL import Image
+
 from llava.utils.ops import convert_expand_to_square
 
 __all__ = [
@@ -122,7 +123,6 @@ class Conversation:
         elif self.sep_style == SeparatorStyle.QWEN2:  # Qwen2 style.
             seps = [self.sep, self.sep2]
             ret = self.system_message + seps[0]
-
             for i, (role, message) in enumerate(messages):
                 if message:
                     if type(message) is tuple:
@@ -328,19 +328,6 @@ conv_llava_llama = Conversation(
     skip_next=False,
     version="llava_llama",
 )
-conv_llava_qwen2 = Conversation(
-    system_message="A chat between a curious user and an artificial intelligence assistant. "
-                   "The assistant gives helpful, detailed, and polite answers to the user's questions.",
-    roles=("USER", "ASSISTANT"),
-    messages=(),
-    offset=0,
-    sep_style=SeparatorStyle.QWEN2,
-    sep=" ",
-    sep2="<|endoftext|>",
-    stop_str=None,
-    skip_next=False,
-    version="llava_qwen2",
-)
 
 conv_vicuna_v1 = Conversation(
     system_message="A chat between a curious user and an artificial intelligence assistant. "
@@ -371,8 +358,7 @@ conv_llama = Conversation(
     version="llama",
 )
 conv_qwen2 = Conversation(
-    system_message="A chat between a curious user and an artificial intelligence assistant. "
-                   "The assistant gives helpful, detailed, and polite answers to the user's questions.",
+    system_message="A chat between a curious user and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user's questions.",
     roles=("USER", "ASSISTANT"),
     messages=(),
     offset=0,
@@ -390,7 +376,6 @@ conv_templates = {
     "llava_vicuna_v1": conv_llava_vicuna_v1,
     "llava_vicuna_v1_mmtag": conv_llava_vicuna_v1_mmtag,
     "llava_llama": conv_llava_llama,
-    "llava_qwen2": conv_llava_qwen2,
 
     # finetune.
     "vicuna_v1": conv_vicuna_v1,
