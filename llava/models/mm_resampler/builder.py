@@ -11,14 +11,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-import re
-from typing import Any, Dict
+from typing import Dict
 
 import torch
 from torch import nn
 
+from .masked_drop import MaskedDrop
+from .perceiver import PerceiverResampler
+from .qformer import Qformer
+from .spatial_pool import SpatialPool
+
 __all__ = [
-    "IdentityMap", "SimpleResBlock", "build_vision_projector"
+    "IdentityMap", "build_vision_resampler",
 ]
 
 
@@ -48,53 +52,16 @@ class IdentityMap(nn.Module):
         return x
 
     @property
-    def config(self) -> Dict[str, str]:
+    def config(self) -> Dict[str, None]:
         """Returns the configuration for the identity projector.
 
         Returns:
             Dict[str, str]: Configuration dictionary.
         """
-        return {"mm_projector_type": "identity"}
+        return {"mm_resampler_type": None}
 
 
-class SimpleResBlock(nn.Module):
-    """Simple residual block with LayerNorm and MLP.
-
-    Args:
-        channels (int): Number of input and output channels.
-
-    Methods:
-        forward(x): Applies normalization and residual MLP.
-    """
-
-    def __init__(self, channels: int) -> None:
-        """Initializes the SimpleResBlock.
-
-        Args:
-            channels (int): Number of channels for input and output.
-        """
-        super().__init__()
-        self.pre_norm = nn.LayerNorm(channels)
-        self.proj = nn.Sequential(
-            nn.Linear(channels, channels),
-            nn.GELU(),
-            nn.Linear(channels, channels)
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Applies layer normalization and residual MLP to the input.
-
-        Args:
-            x (torch.Tensor): Input tensor.
-
-        Returns:
-            torch.Tensor: Output tensor after residual connection.
-        """
-        x = self.pre_norm(x)
-        return x + self.proj(x)
-
-
-def build_vision_projector(config: Any, **kwargs) -> nn.Module:
+def build_vision_resampler(model_args, **kwargs) -> nn.Module:
     """Builds a vision projector module based on the configuration.
 
     Args:
@@ -107,21 +74,16 @@ def build_vision_projector(config: Any, **kwargs) -> nn.Module:
     Raises:
         ValueError: If the projector type is unknown.
     """
-    projector_type = getattr(config, "mm_projector_type", "linear")
-
-    if projector_type == "linear":
-        return nn.Linear(config.mm_hidden_size, config.hidden_size)
-
-    mlp_gelu_match = re.match(r"^mlp(\d+)x_gelu$", projector_type)
-    if mlp_gelu_match:
-        mlp_depth = int(mlp_gelu_match.group(1))
-        modules = [nn.Linear(config.mm_hidden_size, config.hidden_size)]
-        for _ in range(1, mlp_depth):
-            modules.append(nn.GELU())
-            modules.append(nn.Linear(config.hidden_size, config.hidden_size))
-        return nn.Sequential(*modules)
-
-    if projector_type == "identity":
+    resampler_type = getattr(model_args, "mm_resampler_type", None)
+    if resampler_type == "masked_drop":
+        return MaskedDrop(model_args)
+    elif resampler_type == "spatial_pool":
+        return SpatialPool(model_args, **kwargs)
+    elif resampler_type == "perceiver":
+        return PerceiverResampler(model_args, **kwargs)
+    elif resampler_type == "qformer":
+        return Qformer(model_args, **kwargs)
+    elif resampler_type is None:
         return IdentityMap()
 
-    raise ValueError(f"Unknown projector type: {projector_type}")
+    raise ValueError(f"Unknown resampler type: {resampler_type}")

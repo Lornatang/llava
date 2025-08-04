@@ -1,0 +1,58 @@
+# Copyright Lornatang. All Rights Reserved.
+# Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
+import math
+
+from torch import nn
+
+
+class SpatialPool(nn.Module):
+    def __init__(self, model_args, vision_tower):
+        super().__init__()
+
+        self.mode = model_args.mm_spatial_pool_mode
+        self.stride = model_args.mm_spatial_pool_stride
+        self.out_channels = getattr(model_args, "mm_spatial_pool_out_channels", vision_tower.hidden_size)
+
+        if self.mode == "average":
+            self.pool = nn.AvgPool2d(kernel_size=self.stride, stride=self.stride)
+        elif self.mode == "max":
+            self.pool = nn.MaxPool2d(kernel_size=self.stride, stride=self.stride)
+        elif self.mode == "conv":
+            self.pool = nn.Conv2d(in_channels=vision_tower.hidden_size, out_channels=self.out_channels, kernel_size=self.stride, stride=self.stride)
+        else:
+            raise ValueError(f"Unknown pooling mode: {self.pool}.")
+
+    def forward(self, image_features, images, *args, **kwargs):
+        ori_W = int(math.sqrt(image_features.shape[1] * images.shape[3] // images.shape[2]))
+        ori_H = int(ori_W * images.shape[2] // images.shape[3])
+
+        B, _, F = image_features.shape
+
+        image_features_spatial = image_features.view(B, ori_H, ori_H, F).permute(0, 3, 1, 2)
+        image_features_spatial_pool = self.pool(image_features_spatial)
+
+        return image_features_spatial_pool.flatten(2).transpose(1, 2).contiguous()
+
+    @property
+    def config(self):
+        return {
+            "mm_resampler_type": "spatial_pool",
+            "mm_spatial_pool_stride": self.stride,
+            "mm_spatial_pool_mode": self.mode,
+            "mm_spatial_pool_out_channels": self.out_channels,
+        }
+
+    @property
+    def hidden_size(self):
+        return self.out_channels

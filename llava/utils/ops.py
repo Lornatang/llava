@@ -19,6 +19,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 import requests
 import torch
+import torch.distributed as dist
 import transformers
 from PIL import Image
 from deepspeed import zero
@@ -29,9 +30,8 @@ from llava.constants import IMAGE_TOKEN_INDEX
 __all__ = [
     "convert_expand_to_square", "divide_to_patches", "find_all_linear_names", "load_image", "load_image_from_base64", "get_anyres_image_grid_shape",
     "get_length_grouped_indices", "get_model_name_from_path", "get_peft_state_maybe_zero_3", "get_peft_state_non_lora_maybe_zero_3",
-    "get_mm_length_grouped_indices",
-    "get_mm_adapter_state_maybe_zero_3", "maybe_zero_3", "process_anyres_image", "process_images", "resize_and_pad_image", "select_best_resolution",
-    "tokenizer_image_token", "unpad_image",
+    "get_mm_length_grouped_indices", "get_mm_adapter_state_maybe_zero_3", "maybe_zero_3", "process_anyres_image", "process_images", "rank0_print",
+    "resize_and_pad_image", "select_best_resolution", "tokenizer_image_token", "unpad_image",
 ]
 
 
@@ -412,6 +412,19 @@ def process_images(
     if all(x.shape == new_images[0].shape for x in new_images):
         new_images = torch.stack(new_images, dim=0)
     return new_images
+
+
+def rank0_print(*args) -> None:
+    """Prints messages only from the process with rank 0.
+
+    Args:
+        *args (Any): Variable length argument list to be printed.
+    """
+    if dist.is_initialized():
+        if dist.get_rank() == 0:
+            print(f"Rank {dist.get_rank()}: ", *args)
+    else:
+        print(*args)
 
 
 def resize_and_pad_image(

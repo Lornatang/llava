@@ -27,7 +27,7 @@ __all__ = [
 
 
 class LlavaLlamaConfig(LlamaConfig):
-    """Configuration class for llava_llama model."""
+    """Configuration class for LlavaLlamaConfig model."""
     model_type: str = "llava_llama"
 
 
@@ -59,17 +59,14 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         super().__init__(
             config=config,
         )
+        config.model_type = "llava_llama"
+        config.rope_scaling = None
+
         self.model: LlavaLlamaModel = LlavaLlamaModel(config)
-        self.pretraining_tp: int = config.pretraining_tp
-        self.vocab_size: int = config.vocab_size
         self.lm_head: nn.Linear = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
         # Initialize weights and apply final processing.
         self.post_init()
-
-    def get_model(self) -> LlavaLlamaModel:
-        """Get the underlying Llava Llama model."""
-        return self.model
 
     def forward(
             self,
@@ -86,6 +83,8 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             images: Optional[torch.FloatTensor] = None,
             image_sizes: Optional[List[List[int]]] = None,
             return_dict: Optional[bool] = None,
+            modalities: List[str] = None,
+            dpo_forward: Optional[bool] = False,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         """Forward pass for the Llava Llama model.
 
@@ -103,10 +102,15 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             images (torch.FloatTensor, optional): Input images for multimodal processing. Defaults to ``None``.
             image_sizes (List[List[int]], optional): Sizes of the input images. Defaults to ``None``.
             return_dict (bool, optional): Whether to return a dictionary of outputs. Defaults to ``None``.
+            modalities (List[str], optional): List of modalities to process. Defaults to ``None``.
+            dpo_forward (bool, optional): Whether to perform DPO forward pass. Defaults to ``False``.
 
         Returns:
             Union[Tuple, CausalLMOutputWithPast]: Model outputs, either as a tuple or a CausalLMOutputWithPast object.
         """
+        if modalities is None:
+            modalities = ["image"]
+
         if inputs_embeds is None:
             (
                 input_ids,
@@ -114,7 +118,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 attention_mask,
                 past_key_values,
                 inputs_embeds,
-                labels
+                labels,
             ) = self.prepare_inputs_labels_for_multimodal(
                 input_ids,
                 position_ids,
@@ -122,21 +126,42 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 past_key_values,
                 labels,
                 images,
-                image_sizes
+                image_sizes,
+                modalities,
+            )
+        if dpo_forward:
+            outputs = self.model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                past_key_values=past_key_values,
+                inputs_embeds=inputs_embeds,
+                use_cache=use_cache,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
             )
 
-        return super().forward(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            position_ids=position_ids,
-            past_key_values=past_key_values,
-            inputs_embeds=inputs_embeds,
-            use_cache=use_cache,
-            labels=labels,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict
-        )
+            hidden_states = outputs[0]
+            logits = self.lm_head(hidden_states)
+            return logits, labels
+        else:
+            return super().forward(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                past_key_values=past_key_values,
+                inputs_embeds=inputs_embeds,
+                use_cache=use_cache,
+                labels=labels,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict
+            )
+
+    def get_model(self) -> LlavaLlamaModel:
+        """Get the underlying Llava Llama model."""
+        return self.model
 
     def prepare_inputs_for_generation(
             self,
@@ -151,7 +176,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             input_ids (torch.LongTensor): Input token IDs.
             past_key_values (Optional[List[torch.FloatTensor]], optional): Cached past key values. Defaults to ``None``.
             inputs_embeds (Optional[torch.FloatTensor], optional): Input embeddings. Defaults to ``None``.
-            **kwargs: Additional keyword arguments, may include 'images' (image features) and 'image_sizes' (image sizes).
+            **kwargs: Additional keyword arguments may include 'images' (image features) and 'image_sizes' (image sizes).
 
         Returns:
             Dict: Dictionary containing all required inputs for generation, including multimodal information if provided.
@@ -173,6 +198,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             inputs: Optional[torch.Tensor] = None,
             images: Optional[torch.Tensor] = None,
             image_sizes: Optional[torch.Tensor] = None,
+            modalities: List[str] = None,
             **kwargs,
     ) -> Union[GenerateOutput, torch.LongTensor]:
         """Generate sequences from the Llava Llama model.
@@ -181,11 +207,15 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             inputs (torch.Tensor, optional): Input token IDs. Defaults to ``None``.
             images (torch.Tensor, optional): Input images for multimodal generation. Defaults to ``None``.
             image_sizes (torch.Tensor, optional): Sizes of the input images. Defaults to ``None``.
+            modalities (List[str], optional): List of modalities to process. Defaults to ``None``.
             **kwargs: Additional keyword arguments for generation.
 
         Returns:
             Union[GenerateOutput, torch.LongTensor]: Generated sequences or generation output.
         """
+        if modalities is None:
+            modalities = ["image"]
+
         position_ids = kwargs.pop("position_ids", None)
         attention_mask = kwargs.pop("attention_mask", None)
 
@@ -207,7 +237,8 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 past_key_values=None,
                 labels=None,
                 images=images,
-                image_sizes=image_sizes
+                image_sizes=image_sizes,
+                modalities=modalities,
             )
         else:
             inputs_embeds = self.get_model().embed_tokens(inputs)
@@ -216,7 +247,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             position_ids=position_ids,
             attention_mask=attention_mask,
             inputs_embeds=inputs_embeds,
-            **kwargs
+            **kwargs,
         )
 
 
