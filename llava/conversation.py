@@ -13,6 +13,7 @@
 # ==============================================================================
 import base64
 import dataclasses
+import re
 from enum import auto, Enum
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -136,11 +137,12 @@ class Conversation:
 
         return ret
 
-    def get_images(self, return_pil: bool = False) -> List[Any]:
+    def get_images(self, return_pil: bool = False, return_path: bool = False) -> List[Any]:
         """Extract images from the conversation messages.
 
         Args:
-            return_pil (bool, optional): Whether to return PIL images. Defaults to False.
+            return_pil (bool, optional): Whether to return PIL images. Defaults to ``False``.
+            return_path (bool, optional): Whether to return image paths instead of processed images. Defaults to ``False``.
 
         Returns:
             List[Any]: List of processed images.
@@ -150,31 +152,59 @@ class Conversation:
             if i % 2 == 0:
                 if type(message) is tuple:
                     message, image, image_process_mode = message
-                    image = self.process_image(image, image_process_mode, return_pil=return_pil)
-                    images.append(image)
+                    if type(image) != list:
+                        image = [image]
+                    for img in image:
+                        if not return_path and self.is_image_file(img):
+                            img = self.process_image(img, image_process_mode, return_pil=return_pil)
+                            images.append(img)
+                        else:
+                            images.append(img)
         return images
 
     @staticmethod
+    def is_image_file(filename: str) -> bool:
+        """Check if a filename corresponds to an image file.
+
+        Args:
+            filename (str): The name of the file to check.
+
+        Returns:
+            bool: True if the file is an image, False otherwise.
+        """
+        image_extensions = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp"]
+        return any(filename.lower().endswith(ext) for ext in image_extensions)
+
+    @staticmethod
+    def is_video_file(filename: str) -> bool:
+        """Check if a filename corresponds to a video file.
+
+        Args:
+            filename (str): The name of the file to check.
+
+        Returns:
+            bool: True if the file is a video, False otherwise.
+        """
+        video_extensions = [".mp4", ".mov", ".avi", ".mkv", ".wmv", ".flv", ".mpeg", ".mpg"]
+        return any(filename.lower().endswith(ext) for ext in video_extensions)
+
+    @staticmethod
     def process_image(
-            image: Image.Image,
+            image: Union[Image.Image, str],
             image_process_mode: str,
             return_pil: bool = False,
             image_format: str = "PNG",
-            max_len: int = 1344,
-            min_len: int = 672
     ) -> Union[str, Image.Image]:
         """Process an image according to the specified mode.
 
         Args:
-            image (PIL.Image.Image): The input image.
+            image (Union[Image.Image, str]): The input image.
             image_process_mode (str): The image processing mode ('Pad', 'Default', 'Crop', 'Resize').
             return_pil (bool, optional): Whether to return a PIL image. Defaults to False.
             image_format (str, optional): The format for saving the image. Defaults to "PNG".
-            max_len (int, optional): Maximum allowed image size. Defaults to 1344.
-            min_len (int, optional): Minimum allowed image size. Defaults to 672.
 
         Returns:
-            Union[str, PIL.Image.Image]: Base64 string if return_pil is False, otherwise PIL image.
+            Union[str, Image.Image]: Base64 string if return_pil is False, otherwise PIL image.
         """
         if image_process_mode == "Pad":
             image = convert_expand_to_square(image, background_color=(114, 114, 114))
@@ -185,24 +215,29 @@ class Conversation:
         else:
             raise ValueError(f"Invalid image_process_mode: {image_process_mode}")
 
-        if max(image.size) > max_len:
-            max_hw, min_hw = max(image.size), min(image.size)
-            aspect_ratio = max_hw / min_hw
-            shortest_edge = int(min(max_len / aspect_ratio, min_len, min_hw))
-            longest_edge = int(shortest_edge * aspect_ratio)
-            width, height = image.size
-            if height > width:
-                height, width = longest_edge, shortest_edge
-            else:
-                height, width = shortest_edge, longest_edge
-            image = image.resize((width, height))
+        if type(image) is not Image.Image:
+            image = Image.open(image).convert("RGB")
 
-        if not return_pil:
+        max_hw, min_hw = max(image.size), min(image.size)
+        aspect_ratio = max_hw / min_hw
+        max_len, min_len = 672, 448
+        shortest_edge = int(min(max_len / aspect_ratio, min_len, min_hw))
+        longest_edge = int(shortest_edge * aspect_ratio)
+        image_width, image_height = image.size
+        if image_height > image_width:
+            image_height, image_width = longest_edge, shortest_edge
+        else:
+            image_height, image_width = shortest_edge, longest_edge
+
+        image = image.resize((image_width, image_height))
+
+        if return_pil:
+            return image
+        else:
             buffered = BytesIO()
             image.save(buffered, format=image_format)
-            image_b64_str = base64.b64encode(buffered.getvalue()).decode()
-            return image_b64_str
-        return image
+            image_base64_str = base64.b64encode(buffered.getvalue()).decode()
+            return image_base64_str
 
     def to_gradio_chatbot(self) -> List[List[Any]]:
         """Convert the conversation to Gradio chatbot format.
@@ -215,10 +250,32 @@ class Conversation:
             if i % 2 == 0:
                 if type(message) is tuple:
                     message, image, image_process_mode = message
-                    image_b64_str = self.process_image(image, "Default", return_pil=False, image_format="JPEG")
-                    image_str = f"<image src='data:image/jpeg;base64,{image_b64_str}' alt='user upload image' />"
-                    message = image_str + message.replace("<image>", "").strip()
-                    ret.append([message, None])
+                    if type(image) != list:
+                        image = [image]
+                    if len(image) == 1:
+                        message = "<image>\n" + message.replace("<image>", "").strip()
+                    else:
+                        message = re.sub(r"(<image>)\n(?=<image>)", r"\1 ", message)
+
+                    image_str_list = []
+                    for img in image:
+                        if self.is_image_file(img):
+                            image_base64_str = self.process_image(img, "Default", return_pil=False, image_format="JPEG")
+                            image_str = f'<img src="data:image/jpeg;base64,{image_base64_str}" style="max-width: 256px; max-height: 256px; width: auto; height: auto; object-fit: contain;"/>'
+                            image_str_list.append(image_str)
+                        elif self.is_video_file(img):
+                            ret.append(((img,), None))
+
+                    message = message.strip()
+                    image_place_holder = ""
+                    for image_str in image_str_list:
+                        image_place_holder += f"{image_str}\n\n"
+
+                    if len(image_str_list) > 0:
+                        message = f"{image_place_holder}\n\n{message}"
+
+                    if len(message) > 0:
+                        ret.append([message, None])
                 else:
                     ret.append([message, None])
             else:
