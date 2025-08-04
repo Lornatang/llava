@@ -59,8 +59,10 @@ class LlavaQwen2ForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
         super().__init__(
             config=config,
         )
+        config.model_type = "llava_qwen"
+        config.rope_scaling = None
+
         self.model: LlavaQwen2Model = LlavaQwen2Model(config)
-        self.vocab_size: int = config.vocab_size
         self.lm_head: nn.Linear = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
         # Initialize weights and apply final processing.
