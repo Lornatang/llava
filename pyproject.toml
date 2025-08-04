@@ -31,7 +31,7 @@ classifiers = [
 # Required dependencies
 dependencies = [
     "deepspeed",
-    "flash-attn==2.8.0",
+    "flash-attn>2.8.0",
     "peft",
     "pillow",
     "pi-heif",
