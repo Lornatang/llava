@@ -370,18 +370,6 @@ conv_qwen = Conversation(
     skip_next=False,
     version="qwen"
 )
-# conv_qwen2 = Conversation(
-#     system_message="A chat between a curious user and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user's questions.",
-#     roles=("USER", "ASSISTANT"),
-#     messages=(),
-#     offset=0,
-#     sep_style=SeparatorStyle.QWEN2_5,
-#     sep=" ",
-#     sep2="<|endoftext|>",
-#     stop_str=None,
-#     skip_next=False,
-#     version="qwen2_5",
-# )
 
 conv_templates = {
     # pretrain.
@@ -395,6 +383,5 @@ conv_templates = {
     "llama": conv_llama2,
     "qwen1_5": conv_qwen,
     "qwen2": conv_qwen,
-    # "qwen2": conv_qwen2,
 }
 default_conversation = conv_templates["vicuna_v1"]
