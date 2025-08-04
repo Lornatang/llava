@@ -29,9 +29,9 @@ from llava.constants import IMAGE_TOKEN_INDEX
 
 __all__ = [
     "convert_expand_to_square", "divide_to_patches", "find_all_linear_names", "load_image", "load_image_from_base64", "get_anyres_image_grid_shape",
-    "get_length_grouped_indices", "get_model_name_from_path", "get_peft_state_maybe_zero_3", "get_peft_state_non_lora_maybe_zero_3",
-    "get_mm_length_grouped_indices", "get_mm_adapter_state_maybe_zero_3", "maybe_zero_3", "process_anyres_image", "process_images", "rank0_print",
-    "resize_and_pad_image", "select_best_resolution", "tokenizer_image_token", "unpad_image",
+    "get_model_name_from_path", "get_peft_state_maybe_zero_3", "get_peft_state_non_lora_maybe_zero_3", "get_mm_adapter_state_maybe_zero_3",
+    "maybe_zero_3", "process_anyres_image", "process_images", "rank0_print", "resize_and_pad_image", "select_best_resolution", "split_to_even_chunks",
+    "tokenizer_image_token", "unpad_image",
 ]
 
 
@@ -163,36 +163,6 @@ def get_anyres_image_grid_shape(
     return width // patch_size, height // patch_size
 
 
-def get_length_grouped_indices(
-        lengths: List[int],
-        batch_size: int,
-        world_size: int,
-        generator: Optional[torch.Generator] = None,
-) -> List[int]:
-    """Groups indices by length for batching.
-
-    Args:
-        lengths (List[int]): List of sample lengths.
-        batch_size (int): Batch size.
-        world_size (int): Number of distributed workers.
-        generator (Optional[torch.Generator], optional): Random generator. Defaults to ``None``.
-
-    Returns:
-        List[int]: Grouped and shuffled indices.
-    """
-    # Shuffle indices based on lengths.
-    indices = torch.randperm(len(lengths), generator=generator)
-    megabatch_size = world_size * batch_size
-    # Split indices into mega_batches.
-    mega_batches = [indices[i: i + megabatch_size].tolist() for i in range(0, len(lengths), megabatch_size)]
-    # Sort each megabatch by length in descending order.
-    mega_batches = [sorted(megabatch, key=lambda i: lengths[i], reverse=True) for megabatch in mega_batches]
-    # If the last megabatch is smaller than the megabatch size, add it to the previous one.
-    mega_batches = [split_to_even_chunks(megabatch, lengths, world_size) for megabatch in mega_batches]
-
-    return [i for megabatch in mega_batches for batch in megabatch for i in batch]
-
-
 def get_model_name_from_path(model_path: str) -> str:
     """Extracts the model name from a model path.
 
@@ -263,52 +233,6 @@ def get_peft_state_non_lora_maybe_zero_3(named_params: Iterable, require_grad_on
         to_return = {k: t for k, t in to_return.items() if t.requires_grad}
     to_return = {k: maybe_zero_3(v, ignore_status=True).cpu() for k, v in to_return.items()}
     return to_return
-
-
-def get_mm_length_grouped_indices(
-        lengths: List[int],
-        batch_size: int,
-        world_size: int,
-        generator: Optional[torch.Generator] = None
-) -> Union[List[List[Any]], list[int]]:
-    """Groups indices by modality and length for batching.
-
-    Args:
-        lengths (List[int]): List of sample lengths (positive for multimodal, negative for language).
-        batch_size (int): Batch size.
-        world_size (int): Number of distributed workers.
-        generator (Optional[torch.Generator], optional): Random generator. Defaults to None.
-
-    Returns:
-        Union[List[List[Any]], list[int]]: Grouped and shuffled indices.
-    """
-    assert all(l != 0 for l in lengths), "Should not have zero length."
-
-    if all(l > 0 for l in lengths) or all(l < 0 for l in lengths):
-        return get_length_grouped_indices(lengths, batch_size, world_size, generator=generator)
-
-    # multi modality sample.
-    mm_indices, mm_lengths = zip(*[(i, l) for i, l in enumerate(lengths) if l > 0])
-    # language sample.
-    lang_indices, lang_lengths = zip(*[(i, -l) for i, l in enumerate(lengths) if l < 0])
-
-    mm_shuffle = [mm_indices[i] for i in get_length_grouped_indices(mm_lengths, batch_size, world_size, generator=None)]
-    lang_shuffle = [lang_indices[i] for i in get_length_grouped_indices(lang_lengths, batch_size, world_size, generator=None)]
-    megabatch_size = world_size * batch_size
-    mm_mega_batches = [mm_shuffle[i: i + megabatch_size] for i in range(0, len(mm_shuffle), megabatch_size)]
-    lang_mega_batches = [lang_shuffle[i: i + megabatch_size] for i in range(0, len(lang_shuffle), megabatch_size)]
-
-    last_mm = mm_mega_batches[-1]
-    last_lang = lang_mega_batches[-1]
-    additional_batch = last_mm + last_lang
-    mega_batches = mm_mega_batches[:-1] + lang_mega_batches[:-1]
-    megabatch_indices = torch.randperm(len(mega_batches), generator=generator)
-    mega_batches = [mega_batches[i] for i in megabatch_indices]
-
-    if len(additional_batch) > 0:
-        mega_batches.append(sorted(additional_batch))
-
-    return [i for megabatch in mega_batches for i in megabatch]
 
 
 def get_mm_adapter_state_maybe_zero_3(
