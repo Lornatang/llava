@@ -24,7 +24,7 @@ from transformers.trainer import (
     has_length,
 )
 
-from llava.data.sampler import LengthGroupedSampler
+from llava.data.utils import LengthGroupedSampler
 from llava.utils.events import LOGGER
 
 __all__ = [

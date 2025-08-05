@@ -71,13 +71,16 @@ def get_length_grouped_indices_auto_single(
     Returns:
           List[int]: Grouped and shuffled indices for single modality.
     """
+    # Shuffle indices based on lengths.
     indices = get_length_grouped_indices_hf(lengths, batch_size * world_size, generator=generator)
-
     megabatch_size = world_size * batch_size
+    # Split indices into mega_batches.
     megabatches = [indices[i: i + megabatch_size] for i in range(0, len(lengths), megabatch_size)]
+    # Sort each megabatch by length in descending order.
     megabatches = [sorted(megabatch, key=lambda i: lengths[i], reverse=True) for megabatch in megabatches]
+    # If the last megabatch is smaller than the megabatch size, add it to the previous one.
     megabatches = [split_to_even_chunks(megabatch, lengths, world_size) for megabatch in megabatches]
-
+    # Shuffle the megabatches.
     batch_indices = torch.randperm(len(megabatches), generator=generator)
     megabatches = [megabatches[i] for i in batch_indices]
 
@@ -96,19 +99,18 @@ def get_mm_length_grouped_indices(
         lengths (List[int]): List of sample lengths (positive for multimodal, negative for language).
         batch_size (int): Batch size.
         world_size (int): Number of distributed workers.
-        generator (Optional[torch.Generator], optional): Random generator. Defaults to None.
+        generator (Optional[torch.Generator], optional): Random generator. Defaults to ``None``.
 
     Returns:
         Union[List[List[Any]], list[int]]: Grouped and shuffled indices.
     """
     assert all(l != 0 for l in lengths), "Should not have zero length."
 
+    # mm sample lengths are positive, lang sample lengths are negative.
     if all(l > 0 for l in lengths) or all(l < 0 for l in lengths):
         return get_length_grouped_indices(lengths, batch_size, world_size, generator=generator)
 
-    # multi modality sample.
     mm_indices, mm_lengths = zip(*[(i, l) for i, l in enumerate(lengths) if l > 0])
-    # language sample.
     lang_indices, lang_lengths = zip(*[(i, -l) for i, l in enumerate(lengths) if l < 0])
 
     mm_shuffle = [mm_indices[i] for i in get_length_grouped_indices(mm_lengths, batch_size, world_size, generator=None)]
@@ -142,13 +144,14 @@ def get_mm_length_grouped_indices_auto(
         lengths (List[int]): List of sample lengths (positive for multimodal, negative for language).
         batch_size (int): Batch size.
         world_size (int): Number of distributed workers.
-        generator (Optional[torch.Generator], optional): Random generator. Defaults to None.
+        generator (Optional[torch.Generator], optional): Random generator. Defaults to ``None``.
 
     Returns:
         Union[List[List[Any]], list[int]]: Grouped and shuffled indices.
     """
     assert all(l != 0 for l in lengths), "Should not have zero length."
 
+    # mm sample lengths are positive, lang sample lengths are negative.
     if all(l > 0 for l in lengths) or all(l < 0 for l in lengths):
         return get_length_grouped_indices_auto_single(lengths, batch_size, world_size, generator=generator)
 
@@ -161,16 +164,15 @@ def get_mm_length_grouped_indices_auto(
     mm_megabatches = [mm_shuffle[i: i + megabatch_size] for i in range(0, len(mm_shuffle), megabatch_size)]
     lang_megabatches = [lang_shuffle[i: i + megabatch_size] for i in range(0, len(lang_shuffle), megabatch_size)]
 
-    last_mm = mm_megabatches[-1]
-    last_lang = lang_megabatches[-1]
-    additional_batch = last_mm + last_lang
     megabatches = mm_megabatches[:-1] + lang_megabatches[:-1]
     megabatch_indices = torch.randperm(len(megabatches), generator=generator)
     megabatches = [megabatches[i] for i in megabatch_indices]
 
-    # FIXME: Hard code to avoid last batch mixed with different modalities
-    # if len(additional_batch) > 0:
-    #     megabatches.append(sorted(additional_batch))
+    # Hard code to avoid last batch mixed with different modalities.
+    if len(mm_megabatches[-1]) > 0:
+        megabatches.append(mm_megabatches[-1])
+    if len(lang_megabatches[-1]) > 0:
+        megabatches.append(lang_megabatches[-1])
 
     return [i for megabatch in megabatches for i in megabatch]
 

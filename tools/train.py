@@ -30,11 +30,21 @@ from llava.engine.trainer import LLaVATrainer
 from llava.models.llm import LlavaLlamaForCausalLM, LlavaQwen2ForCausalLM
 from llava.utils.checkpoint import safe_save_model_for_hf_trainer
 from llava.utils.ops import (
-    convert_expand_to_square, find_all_linear_names, get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3, rank0_print,
+    convert_expand_to_square, find_all_linear_names, get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3,
     tokenizer_image_token,
 )
 
 local_rank = None
+
+
+def _rank0_print(*args) -> None:
+    """Prints messages only from the process with rank 0.
+
+    Args:
+        *args (Any): Variable length argument list to be printed.
+    """
+    if local_rank == 0:
+        print(*args)
 
 
 def _tokenize_fn(strings: Sequence[str], tokenizer: transformers.PreTrainedTokenizer) -> Dict[str, Sequence[torch.Tensor]]:
@@ -224,7 +234,7 @@ class LazySupervisedDataset(torch.utils.data.Dataset):
             data_args (DataArguments): The data arguments containing paths and configurations.
         """
         super().__init__()
-        rank0_print("Formatting inputs...Skip in lazy mode.")
+        _rank0_print("Formatting inputs...Skip in lazy mode.")
         self.tokenizer: transformers.PreTrainedTokenizer = tokenizer
         self.list_data_dict: List[Dict[str, str]] = json.load(open(data_path, "r"))
         self.data_args: DataArguments = data_args
@@ -347,7 +357,7 @@ def preprocess(
         return preprocess_plain(sources, tokenizer)
     if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.VICUNA_V1:
         return preprocess_vicuna_v1(sources, tokenizer, has_image)
-    if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.LLAMA:
+    if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.LLAMA2:
         return preprocess_llama2(sources, tokenizer, has_image)
     if conversation_lib.default_conversation.version == "qwen":
         return preprocess_qwen(sources, tokenizer, has_image)
@@ -590,7 +600,7 @@ def preprocess_llama2(
 
     targets = input_ids.clone()
 
-    assert conv.sep_style == conversation_lib.SeparatorStyle.LLAMA
+    assert conv.sep_style == conversation_lib.SeparatorStyle.LLAMA2
 
     # Mask targets: mask everything except assistant responses.
     sep = "[/INST] "
@@ -816,7 +826,7 @@ def train(attn_implementation: str = None) -> None:
                 model.to(torch.bfloat16)
             if training_args.fp16:
                 model.to(torch.float16)
-        rank0_print("Adding LoRA adapters...")
+        _rank0_print("Adding LoRA adapters...")
         model = get_peft_model(model, lora_config)
 
     # Load tokenizer.

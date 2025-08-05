@@ -94,11 +94,12 @@ class SimpleResBlock(nn.Module):
         return x + self.proj(x)
 
 
-def build_vision_projector(config: Any, **kwargs) -> nn.Module:
+def build_vision_projector(config: Any, delay_load: bool = False, **kwargs) -> nn.Module:
     """Builds a vision projector module based on the configuration.
 
     Args:
         config (Any): Configuration object with projector parameters.
+        delay_load (bool, optional): Whether to delay loading. Defaults to False.
         **kwargs: Additional keyword arguments.
 
     Returns:

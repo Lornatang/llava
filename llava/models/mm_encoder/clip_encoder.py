@@ -11,13 +11,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-from typing import Any, Dict, List, Union
+from typing import Any, List, Union
 
 import torch
 from torch import nn
 from transformers import CLIPVisionModel, CLIPImageProcessor, CLIPVisionConfig
-
-from llava.utils.ops import rank0_print
 
 __all__ = [
     "CLIPVisionTower",
@@ -30,14 +28,14 @@ class CLIPVisionTower(nn.Module):
     def __init__(
             self,
             vision_tower: str,
-            args: Dict,
+            args: nn.Module,
             delay_load: bool = False,
     ) -> None:
         """ Initializes the CLIPVisionTower.
 
         Args:
             vision_tower (str): The name or path of the vision tower model.
-            args (Dict): Arguments containing configuration for the vision tower.
+            args (nn.Module): Arguments containing configuration for the vision tower.
             delay_load (bool, optional): If True, the model will not be loaded immediately. Defaults to ``False``.
         """
         super().__init__()
@@ -48,13 +46,8 @@ class CLIPVisionTower(nn.Module):
         self.select_feature: str = getattr(args, "mm_vision_select_feature", "patch")
 
         if not delay_load:
-            rank0_print(f"Loading vision tower: {vision_tower}")
             self.load_model()
         elif getattr(args, "unfreeze_mm_vision_tower", False):
-            rank0_print(f"The checkpoint seems to contain `vision_tower` weights: `unfreeze_mm_vision_tower`: True.")
-            self.load_model()
-        elif hasattr(args, "mm_tunable_parts") and "mm_vision_tower" in args.mm_tunable_parts:
-            rank0_print(f"The checkpoint seems to contain `vision_tower` weights: `mm_tunable_parts` contains `mm_vision_tower`.")
             self.load_model()
         else:
             self.cfg_only = CLIPVisionConfig.from_pretrained(self.vision_tower_name)
@@ -88,7 +81,7 @@ class CLIPVisionTower(nn.Module):
             device_map (Any, optional): Device map for model loading. Defaults to None.
         """
         if self.is_loaded:
-            print(f"{self.vision_tower_name} is already loaded, `load_model` called again, skipping.")
+            print(f"{vision_tower_name} is already loaded, `load_model` called again, skipping.")
             return
 
         self.image_processor = CLIPImageProcessor.from_pretrained(self.vision_tower_name)
@@ -98,7 +91,8 @@ class CLIPVisionTower(nn.Module):
         self.is_loaded = True
 
     def feature_select(self, image_forward_outs: Any) -> torch.Tensor:
-        """Selects features from the model output according to the configured feature type.
+        """
+        Selects features from the model output according to the configured feature type.
 
         Args:
             image_forward_outs (Any): The output object from the vision tower forward pass,
@@ -110,35 +104,18 @@ class CLIPVisionTower(nn.Module):
         Raises:
             ValueError: If `self.select_feature` is not a supported type.
         """
-        select_feature_type = self.select_feature
-
-        if self.select_feature in ["slicefour_patch", "slicefour_cls_patch"]:
-            select_every_k_layer = len(image_forward_outs.hidden_states) // 4
-            image_features = torch.cat(
-                [
-                    image_forward_outs.hidden_states[i] for i in
-                    range(select_every_k_layer + self.select_layer, len(image_forward_outs.hidden_states), select_every_k_layer)
-                ],
-                dim=-1)
-            select_feature_type = select_feature_type.replace("slicefour_", "")
-        elif self.select_feature in ["slice_m25811_f6_patch", "slice_m25811_f6_cls_patch"]:
-            select_layers = [-2, -5, -8, -11, 6]
-            image_features = torch.cat([image_forward_outs.hidden_states[i] for i in select_layers], dim=-1)
-            select_feature_type = select_feature_type.replace("slice_m25811_f6_", "")
-        else:
-            image_features = image_forward_outs.hidden_states[self.select_layer]
-
-        if select_feature_type == "patch":
+        image_features = image_forward_outs.hidden_states[self.select_layer]
+        if self.select_feature == "patch":
             image_features = image_features[:, 1:]
-        elif select_feature_type == "cls_patch":
+        elif self.select_feature == "cls_patch":
             image_features = image_features
         else:
-            raise ValueError(f"Unexpected select feature: {select_feature_type}")
+            raise ValueError(f"Unexpected select feature: {self.select_feature}")
         return image_features
 
     @property
     def dummy_feature(self) -> torch.Tensor:
-        """Returns a fake feature tensor for the vision tower.
+        """Returns a dummy feature tensor for the vision tower.
 
         Returns:
             torch.Tensor: A zero tensor with shape (1, hidden_size).
@@ -182,12 +159,7 @@ class CLIPVisionTower(nn.Module):
         Returns:
             int: The hidden size.
         """
-        _hidden_size = self.config.hidden_size
-        if "slicefour" in self.select_feature:
-            _hidden_size *= 4
-        if "slice_m25811_f6" in self.select_feature:
-            _hidden_size *= 5
-        return _hidden_size
+        return self.config.hidden_size
 
     @property
     def num_patches_per_side(self) -> int:
@@ -205,16 +177,4 @@ class CLIPVisionTower(nn.Module):
         Returns:
             int: Total number of patches.
         """
-        _num_patches = (self.config.image_size // self.config.patch_size) ** 2
-        if "cls_patch" in self.select_feature:
-            _num_patches += 1
-        return _num_patches
-
-    @property
-    def image_size(self) -> int:
-        """"Returns the size of the input images expected by the vision tower.
-
-        Returns:
-            int: The size of the input images.
-        """
-        return self.config.image_size
+        return (self.config.image_size // self.config.patch_size) ** 2

@@ -11,5 +11,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-from .sampler import LengthGroupedSampler
-from .utils import *  # noqa
+from .utils import LengthGroupedSampler
