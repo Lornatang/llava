@@ -16,7 +16,7 @@ from typing import Any, List, Union
 import torch
 from torch import nn
 from transformers import CLIPVisionModel, CLIPImageProcessor, CLIPVisionConfig
-
+from llava.utils.ops import rank0_print
 __all__ = [
     "CLIPVisionTower",
 ]
@@ -46,33 +46,38 @@ class CLIPVisionTower(nn.Module):
         self.select_feature: str = getattr(args, "mm_vision_select_feature", "patch")
 
         if not delay_load:
+            rank0_print(f"Loading vision tower: {vision_tower}")
             self.load_model()
         elif getattr(args, "unfreeze_mm_vision_tower", False):
+            rank0_print(f"The checkpoint seems to contain `vision_tower` weights: `unfreeze_mm_vision_tower`: True.")
+            self.load_model()
+        elif hasattr(args, "mm_tunable_parts") and "mm_vision_tower" in args.mm_tunable_parts:
+            rank0_print(f"The checkpoint seems to contain `vision_tower` weights: `mm_tunable_parts` contains `mm_vision_tower`.")
             self.load_model()
         else:
             self.cfg_only = CLIPVisionConfig.from_pretrained(self.vision_tower_name)
 
     @torch.no_grad()
-    def forward(self, images: Union[torch.Tensor, List[torch.Tensor]]) -> torch.Tensor:
+    def forward(self, x: Union[torch.Tensor, List[torch.Tensor]]) -> torch.Tensor:
         """Extracts features from input images using the vision tower.
 
         Args:
-            images (Union[torch.Tensor, List[torch.Tensor]]): Input image tensor or list of image tensors.
+            x (Union[torch.Tensor, List[torch.Tensor]]): Input image tensor or list of image tensors.
 
         Returns:
             torch.Tensor: Extracted image features.
         """
-        if type(images) is list:
-            image_features = []
-            for image in images:
+        if type(x) is list:
+            x_features = []
+            for image in x:
                 image_forward_out = self.vision_tower(image.to(device=self.device, dtype=self.dtype).unsqueeze(0), output_hidden_states=True)
                 image_feature = self.feature_select(image_forward_out).to(image.dtype)
-                image_features.append(image_feature)
+                x_features.append(image_feature)
         else:
-            image_forward_outs = self.vision_tower(images.to(device=self.device, dtype=self.dtype), output_hidden_states=True)
-            image_features = self.feature_select(image_forward_outs).to(images.dtype)
+            image_forward_outs = self.vision_tower(x.to(device=self.device, dtype=self.dtype), output_hidden_states=True)
+            x_features = self.feature_select(image_forward_outs).to(x.dtype)
 
-        return image_features
+        return x_features
 
     def load_model(self, device_map: Any = None) -> None:
         """Loads the CLIP vision tower model and its image processor.
@@ -81,7 +86,7 @@ class CLIPVisionTower(nn.Module):
             device_map (Any, optional): Device map for model loading. Defaults to None.
         """
         if self.is_loaded:
-            print(f"{vision_tower_name} is already loaded, `load_model` called again, skipping.")
+            print(f"{self.vision_tower_name} is already loaded, `load_model` called again, skipping.")
             return
 
         self.image_processor = CLIPImageProcessor.from_pretrained(self.vision_tower_name)
