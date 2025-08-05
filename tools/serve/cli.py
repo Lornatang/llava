@@ -84,17 +84,16 @@ def cli(
         image_tensor = image_tensor.to(model.device, dtype=torch.float16)
 
     conv = conv_templates[conv_mode].copy()
-    roles = conv.roles
     while True:
         try:
-            inputs = input(f"{roles[0]}: ")
+            inputs = input(f"User: ")
         except EOFError:
             inputs = ""
         if not inputs:
             print("exit...")
             break
 
-        print(f"{roles[1]}: ", end="")
+        print(f"Assistant: ", end="")
 
         if image is not None and len(conv.messages) == 0:
             if model.config.mm_use_im_start_end:
