@@ -11,7 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-from typing import Dict
+from typing import Any, Dict
 
 import torch
 from torch import nn
@@ -61,18 +61,15 @@ class IdentityMap(nn.Module):
         return {"mm_resampler_type": None}
 
 
-def build_vision_resampler(model_args, **kwargs) -> nn.Module:
-    """Builds a vision projector module based on the configuration.
+def build_vision_resampler(model_args: Dict, **kwargs: Any) -> nn.Module:
+    """Builds a vision resampler based on the specified type in model_args.
 
     Args:
-        config (Any): Configuration object with projector parameters.
-        **kwargs: Additional keyword arguments.
+        model_args (Dict): An object containing model configuration attributes.
+        **kwargs (Any): Additional keyword arguments for specific resampler types.
 
     Returns:
-        nn.Module: The constructed vision projector module.
-
-    Raises:
-        ValueError: If the projector type is unknown.
+        nn.Module: An instance of the specified vision resampler.
     """
     resampler_type = getattr(model_args, "mm_resampler_type", None)
     if resampler_type == "masked_drop":
