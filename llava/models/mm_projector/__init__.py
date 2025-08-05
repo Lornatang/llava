@@ -12,3 +12,4 @@
 # limitations under the License.
 # ==============================================================================
 from .builder import IdentityMap, SimpleResBlock, build_vision_projector
+from .pooler_projector import PoolerProjector

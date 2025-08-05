@@ -17,6 +17,8 @@ from typing import Any, Dict
 import torch
 from torch import nn
 
+from .pooler_projector import PoolerProjector
+
 __all__ = [
     "IdentityMap", "SimpleResBlock", "build_vision_projector"
 ]
@@ -94,7 +96,7 @@ class SimpleResBlock(nn.Module):
         return x + self.proj(x)
 
 
-def build_vision_projector(config: Any, delay_load: bool = False, **kwargs) -> nn.Module:
+def build_vision_projector(config: Any, **kwargs) -> nn.Module:
     """Builds a vision projector module based on the configuration.
 
     Args:
@@ -113,6 +115,9 @@ def build_vision_projector(config: Any, delay_load: bool = False, **kwargs) -> n
     if projector_type == "linear":
         return nn.Linear(config.mm_hidden_size, config.hidden_size)
 
+    if projector_type == "pooler":
+        return PoolerProjector(config, kwargs["vision_cfg"])
+
     mlp_gelu_match = re.match(r"^mlp(\d+)x_gelu$", projector_type)
     if mlp_gelu_match:
         mlp_depth = int(mlp_gelu_match.group(1))
@@ -120,6 +125,18 @@ def build_vision_projector(config: Any, delay_load: bool = False, **kwargs) -> n
         for _ in range(1, mlp_depth):
             modules.append(nn.GELU())
             modules.append(nn.Linear(config.hidden_size, config.hidden_size))
+        return nn.Sequential(*modules)
+
+    mlp_gelu_resnet_match = re.match(r"^mlp(\d+)x_res(\d+)x_gelu$", projector_type)
+    if mlp_gelu_resnet_match:
+        mlp_depth = int(mlp_gelu_resnet_match.group(1))
+        res_depth = int(mlp_gelu_resnet_match.group(2))
+        modules = [nn.Linear(config.mm_hidden_size, config.hidden_size)]
+        for _ in range(1, mlp_depth):
+            modules.append(nn.GELU())
+            modules.append(nn.Linear(config.hidden_size, config.hidden_size))
+        for _ in range(res_depth):
+            modules.append(SimpleResBlock(config.hidden_size))
         return nn.Sequential(*modules)
 
     if projector_type == "identity":
