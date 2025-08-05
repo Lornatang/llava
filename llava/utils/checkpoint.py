@@ -20,7 +20,7 @@ from transformers import AutoTokenizer
 
 from llava.constants import DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.models.llm import LlavaLlamaForCausalLM, LlavaQwen2ForCausalLM
-from .ops import get_mm_adapter_state_maybe_zero_3
+from .ops import get_mm_adapter_state_maybe_zero_3, rank0_print
 
 __all__ = [
     "load_pretrained", "safe_save_model_for_hf_trainer",
@@ -89,9 +89,20 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
     """
     output_path = Path(output_dir)
 
-    if getattr(trainer.args, "tune_mm_mlp_adapter", False):
+    if hasattr(trainer.args, "tune_mm_mlp_adapter") and trainer.args.tune_mm_mlp_adapter:
+        check_only_save_mm_adapter_tunnable = True
+    elif hasattr(trainer.args, "mm_tunable_parts") and (len(trainer.args.mm_tunable_parts.split(",")) == 1 and (
+            "mm_mlp_adapter" in trainer.args.mm_tunable_parts or "mm_vision_resampler" in trainer.args.mm_tunable_parts)):
+        check_only_save_mm_adapter_tunnable = True
+    else:
+        check_only_save_mm_adapter_tunnable = False
+
+    trainer.accelerator.wait_for_everyone()
+    torch.cuda.synchronize()
+    rank0_print(f"Only save projectors: {check_only_save_mm_adapter_tunnable}")
+    if check_only_save_mm_adapter_tunnable:
         # Only save Adapter
-        keys_to_match = ["mm_projector"]
+        keys_to_match = ["mm_projector", "vision_resampler"]
         if getattr(trainer.args, "use_im_start_end", False):
             keys_to_match.extend(["embed_tokens", "embed_in"])
 
@@ -111,15 +122,11 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
         return
 
     if trainer.deepspeed:
-        torch.cuda.synchronize()
         trainer.save_model(output_dir)
         return
 
     state_dict = trainer.model.state_dict()
     if trainer.args.should_save:
-        cpu_state_dict = {
-            key: value.cpu()
-            for key, value in state_dict.items()
-        }
+        cpu_state_dict = {key: value.cpu() for key, value in state_dict.items()}
         del state_dict
         trainer._save(output_dir, state_dict=cpu_state_dict)  # noqa

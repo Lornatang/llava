@@ -13,7 +13,7 @@
 # ==============================================================================
 from datetime import timedelta
 from typing import Any, Optional
-
+from functools import partial
 import bitsandbytes
 import datasets
 import torch
@@ -28,11 +28,11 @@ from transformers.trainer import (
     get_parameter_names,
     has_length,
 )
-from transformers.trainer_utils import seed_worker
 
 from llava.data.sampler import LengthGroupedSampler
 from llava.utils.events import LOGGER
 from llava.utils.ops import rank0_print
+from llava.utils.torch_utils import seed_worker
 
 __all__ = [
     "LLaVATrainer",
@@ -72,8 +72,6 @@ class LLaVATrainer(Trainer):
 
         # create accelerator object.
         self.accelerator = Accelerator(
-            dispatch_batches=self.args.dispatch_batches,
-            split_batches=self.args.split_batches,
             deepspeed_plugin=self.args.deepspeed_plugin,
             gradient_accumulation_plugin=gradient_accumulation_plugin,
             kwargs_handlers=[accelerator_kwargs],
@@ -84,8 +82,11 @@ class LLaVATrainer(Trainer):
         # deepspeed and accelerate flags covering both trainer args and accelerate launcher.
         self.is_deepspeed_enabled = getattr(self.accelerator.state, "deepspeed_plugin", None) is not None
         self.is_fsdp_enabled = getattr(self.accelerator.state, "fsdp_plugin", None) is not None
+        self.is_tp_enabled = getattr(self.accelerator.state, "tp_plugin", None) is not None
 
-        # post accelerator creation setup.
+        if self.is_deepspeed_enabled and getattr(self.args, "hf_deepspeed_config", None) is None:
+            self.propagate_args_to_deepspeed()
+
         if self.is_fsdp_enabled:
             fsdp_plugin = self.accelerator.state.fsdp_plugin
             fsdp_plugin.limit_all_gathers = self.args.fsdp_config.get("limit_all_gathers", fsdp_plugin.limit_all_gathers)
@@ -95,8 +96,9 @@ class LLaVATrainer(Trainer):
                     "The activation_checkpointing in FSDP config and the gradient_checkpointing in training arg can't be set to True simultaneously. "
                     "Please use FSDP's activation_checkpointing logic when using FSDP.")
 
-        if self.is_deepspeed_enabled and getattr(self.args, "hf_deepspeed_config", None) is None:
-            self.propagate_args_to_deepspeed()
+        if self.is_tp_enabled:
+            LOGGER.warning(f"Not supporting TP training in LLaVA. ")
+            pass
 
     def create_optimizer(self) -> torch.optim.Optimizer:
         """Creates and returns the optimizer for training.
@@ -224,7 +226,7 @@ class LLaVATrainer(Trainer):
         if not isinstance(train_dataset, torch.utils.data.IterableDataset):
             dataloader_params["sampler"] = self._get_train_sampler()
             dataloader_params["drop_last"] = self.args.dataloader_drop_last
-            dataloader_params["worker_init_fn"] = seed_worker
+            dataloader_params["worker_init_fn"] = partial(seed_worker, self.args.dataloader_num_workers, self.args.process_index)
             dataloader_params["prefetch_factor"] = self.args.dataloader_num_workers * 2 if self.args.dataloader_num_workers != 0 else None
 
         dataloader = self.accelerator.prepare(torch.utils.data.DataLoader(train_dataset, **dataloader_params))

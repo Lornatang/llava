@@ -13,14 +13,15 @@
 # ==============================================================================
 import copy
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Union
 
 import torch
 import torch.utils.data
 import transformers
-from PIL import Image
+from PIL import Image, ImageFile
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from peft.tuners.lora import LoraLayer
 
@@ -30,21 +31,14 @@ from llava.engine.trainer import LLaVATrainer
 from llava.models.llm import LlavaLlamaForCausalLM, LlavaQwen2ForCausalLM
 from llava.utils.checkpoint import safe_save_model_for_hf_trainer
 from llava.utils.ops import (
-    convert_expand_to_square, find_all_linear_names, get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3,
+    convert_expand_to_square, find_all_linear_names, get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3, rank0_print,
     tokenizer_image_token,
 )
 
+torch.multiprocessing.set_sharing_strategy("file_system")
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 local_rank = None
-
-
-def _rank0_print(*args) -> None:
-    """Prints messages only from the process with rank 0.
-
-    Args:
-        *args (Any): Variable length argument list to be printed.
-    """
-    if local_rank == 0:
-        print(*args)
 
 
 def _tokenize_fn(strings: Sequence[str], tokenizer: transformers.PreTrainedTokenizer) -> Dict[str, Sequence[torch.Tensor]]:
@@ -126,27 +120,78 @@ def _add_speaker_and_signal(header: str, source: List, get_conversation: bool = 
 class ModelArguments:
     """Arguments pertaining to which model/config/tokenizer we are going to fine-tune from."""
     model_name_or_path: Optional[str] = field(default="lmsys/vicuna-13b-v1.5")
+
     version: Optional[str] = field(default="vicuna_v1")
     freeze_backbone: bool = field(default=False)
     tune_mm_mlp_adapter: bool = field(default=False)
+    tune_mm_vision_resampler: bool = field(default=False)
     vision_tower: Optional[str] = field(default=None)
-    mm_vision_select_layer: Optional[int] = field(default=-1)  # default to the last layer
+    vision_tower_pretrained: Optional[str] = field(default=None)
+
+    unfreeze_mm_vision_tower: bool = field(default=False)
+    unfreeze_language_model: bool = field(default=False)
+    mm_tunable_parts: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Could be 'mm_mlp_adapter', 'mm_vision_resampler', 'mm_vision_tower,mm_mlp_adapter,mm_language_model', 'mm_vision_tower,mm_mlp_adapter,mm_language_model', 'mm_mlp_adapter,mm_language_model'"}
+    )
+    mm_vision_select_layer: Optional[int] = field(default=-1)
     pretrain_mm_mlp_adapter: Optional[str] = field(default=None)
     mm_projector_type: Optional[str] = field(default="linear")
     mm_use_im_start_end: bool = field(default=False)
     mm_use_im_patch_token: bool = field(default=True)
     mm_patch_merge_type: Optional[str] = field(default="flat")
     mm_vision_select_feature: Optional[str] = field(default="patch")
+    mm_resampler_type: Optional[str] = field(default=None)
+    mm_mask_drop_mode: str = field(default="fixed")
+    mm_mask_drop_skip_percentage: float = field(default=0.0)
+    mm_mask_drop_ratio: float = field(default=0.25)
+    mm_mask_drop_ratio_upper: Optional[float] = field(default=None)
+    mm_mask_drop_ratio_lower: Optional[float] = field(default=None)
+    mm_spatial_pool_stride: Optional[int] = field(default=None)
+    mm_spatial_pool_mode: str = field(default="bilinear")
+    mm_spatial_pool_out_channels: Optional[int] = field(default=None)
+    mm_perceiver_depth: Optional[int] = field(default=3)
+    mm_perceiver_latents: Optional[int] = field(default=32)
+    mm_perceiver_ff_mult: Optional[float] = field(default=4)
+    mm_perceiver_pretrained: Optional[str] = field(default=None)
+    mm_qformer_depth: Optional[int] = field(default=3)
+    mm_qformer_latents: Optional[int] = field(default=32)
+    mm_qformer_pretrained: Optional[str] = field(default=None)
+
+    mm_newline_position: Optional[str] = field(default="grid")
+    delay_load: Optional[bool] = field(default=True)
+    add_faster_video: Optional[bool] = field(default=False)
+    faster_token_stride: Optional[int] = field(default=10)
+
+    rope_scaling_factor: Optional[float] = field(default=None)
+    rope_scaling_type: Optional[str] = field(default=None)
+
+    use_pos_skipping: Optional[bool] = field(default=False)
+    pos_skipping_range: Optional[int] = field(default=4096)
 
 
 @dataclass
 class DataArguments:
     """Arguments pertaining to the data we are going to use for training and evaluation."""
-    data_path: str = field(default=None, metadata={"help": "Path to the training data."})
+    data_path: str = field(
+        default=None,
+        metadata={"help": "Path to the training data."},
+    )
     lazy_preprocess: bool = False
     is_multimodal: bool = False
+    early_mix_text: bool = False
     image_folder: Optional[str] = field(default=None)
     image_aspect_ratio: str = "square"
+    image_grid_pinpoints: Optional[str] = field(default=None)
+    image_crop_resolution: Optional[int] = field(default=None)
+    image_split_resolution: Optional[int] = field(default=None)
+
+    video_folder: Optional[str] = field(default=None)
+    video_fps: Optional[int] = field(default=1)
+    frames_upbound: Optional[int] = field(default=0)
+    add_time_instruction: Optional[bool] = field(default=False)
+    force_sample: Optional[bool] = field(default=False)
 
 
 @dataclass
@@ -190,22 +235,23 @@ class TrainingArguments(transformers.TrainingArguments):
     optim: str = field(default="adamw_torch")
     remove_unused_columns: bool = field(default=False)
     freeze_mm_mlp_adapter: bool = field(default=False)
+    freeze_mm_vision_resampler: bool = field(default=False)
     mpt_attn_impl: Optional[str] = field(default="triton")
     model_max_length: int = field(
-        default=512,
+        default=4096,
         metadata={"help": "Maximum sequence length. Sequences will be right padded (and possibly truncated)."},
     )
     double_quant: bool = field(
         default=True,
-        metadata={"help": "Compress the quantization statistics through double quantization."}
+        metadata={"help": "Compress the quantization statistics through double quantization."},
     )
     quant_type: str = field(
         default="nf4",
-        metadata={"help": "Quantization data type to use. Should be one of `fp4` or `nf4`."}
+        metadata={"help": "Quantization data type to use. Should be one of `fp4` or `nf4`."},
     )
     bits: int = field(
         default=16,
-        metadata={"help": "How many bits to use."}
+        metadata={"help": "How many bits to use."},
     )
     lora_enable: bool = False
     lora_r: int = 64
@@ -214,7 +260,17 @@ class TrainingArguments(transformers.TrainingArguments):
     lora_weight_path: str = ""
     lora_bias: str = "none"
     mm_projector_lr: Optional[float] = None
+    mm_vision_tower_lr: Optional[float] = None
+    group_by_varlen: bool = field(default=False)
     group_by_modality_length: bool = field(default=False)
+    group_by_modality_length_auto: bool = field(default=False)
+    auto_find_batch_size: bool = field(default=False)
+    gradient_checkpointing: bool = field(default=True)
+    verbose_logging: bool = field(default=False)
+    attn_implementation: str = field(
+        default="flash_attention_2",
+        metadata={"help": "Use transformers attention implementation."},
+    )
 
 
 class LazySupervisedDataset(torch.utils.data.Dataset):
@@ -234,7 +290,7 @@ class LazySupervisedDataset(torch.utils.data.Dataset):
             data_args (DataArguments): The data arguments containing paths and configurations.
         """
         super().__init__()
-        _rank0_print("Formatting inputs...Skip in lazy mode.")
+        rank0_print("Formatting inputs...Skip in lazy mode.")
         self.tokenizer: transformers.PreTrainedTokenizer = tokenizer
         self.list_data_dict: List[Dict[str, str]] = json.load(open(data_path, "r"))
         self.data_args: DataArguments = data_args
@@ -357,7 +413,7 @@ def preprocess(
         return preprocess_plain(sources, tokenizer)
     if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.VICUNA_V1:
         return preprocess_vicuna_v1(sources, tokenizer, has_image)
-    if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.LLAMA2:
+    if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.LLAMA:
         return preprocess_llama2(sources, tokenizer, has_image)
     if conversation_lib.default_conversation.version == "qwen":
         return preprocess_qwen(sources, tokenizer, has_image)
@@ -398,7 +454,7 @@ def preprocess(
 def preprocess_multimodal(
         sources: Dict[str, List[Dict[str, str]]],
         data_args: DataArguments,
-) -> Dict[str, torch.Tensor]:
+) -> Dict[str, List[Dict[str, str]]]:
     """Preprocess conversations for multimodal fine-tuning.
 
     Args:
@@ -414,7 +470,8 @@ def preprocess_multimodal(
 
     for source in sources:
         for sentence in source:
-            if DEFAULT_IMAGE_TOKEN in sentence["value"]:
+            num_image = len(re.findall(DEFAULT_IMAGE_TOKEN, sentence["value"]))
+            if num_image == 1 and DEFAULT_IMAGE_TOKEN in sentence["value"] and not sentence["value"].startswith(DEFAULT_IMAGE_TOKEN):
                 sentence["value"] = sentence["value"].replace(DEFAULT_IMAGE_TOKEN, "").strip()
                 sentence["value"] = DEFAULT_IMAGE_TOKEN + "\n" + sentence["value"]
                 sentence["value"] = sentence["value"].strip()
@@ -424,6 +481,7 @@ def preprocess_multimodal(
             if data_args.mm_use_im_start_end:
                 replace_token = DEFAULT_IM_START_TOKEN + replace_token + DEFAULT_IM_END_TOKEN
             sentence["value"] = sentence["value"].replace(DEFAULT_IMAGE_TOKEN, replace_token)
+            sentence["value"] = sentence["value"].replace("QA_GT_caption_based_noisy", "")
 
     return sources
 
@@ -431,7 +489,7 @@ def preprocess_multimodal(
 def preprocess_plain(
         sources: Dict[str, List[Dict[str, str]]],
         tokenizer: transformers.PreTrainedTokenizer,
-) -> Dict[str, List[Dict[str, str]]]:
+) -> Dict[str, List[Union[List[int], torch.Tensor]]]:
     """Preprocess conversations in plain style.
 
     Args:
@@ -439,7 +497,7 @@ def preprocess_plain(
         tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use for tokenization.
 
     Returns:
-        Dict[str, List[Dict[str, str]]]: A dictionary containing the tokenized input IDs and labels.
+        Dict[str, List[Union[List[int], torch.Tensor]]]: A dictionary containing the tokenized input IDs and labels.
     """
     conversations = []
     for source in sources:
@@ -449,7 +507,6 @@ def preprocess_plain(
         conversation = source[0]["value"] + source[1]["value"] + conversation_lib.default_conversation.sep
         conversations.append(conversation)
 
-    # tokenize conversations.
     input_ids = [tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations]
     targets = copy.deepcopy(input_ids)
     for target, source in zip(targets, sources):
@@ -826,7 +883,7 @@ def train(attn_implementation: str = None) -> None:
                 model.to(torch.bfloat16)
             if training_args.fp16:
                 model.to(torch.float16)
-        _rank0_print("Adding LoRA adapters...")
+        rank0_print("Adding LoRA adapters...")
         model = get_peft_model(model, lora_config)
 
     # Load tokenizer.

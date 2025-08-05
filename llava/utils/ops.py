@@ -26,6 +26,7 @@ from deepspeed import zero
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 
 from llava.constants import IMAGE_TOKEN_INDEX
+from .events import LOGGER
 
 __all__ = [
     "convert_expand_to_square", "divide_to_patches", "find_all_linear_names", "load_image", "load_image_from_base64", "get_anyres_image_grid_shape",
@@ -267,7 +268,7 @@ def maybe_zero_3(param: torch.nn.Parameter, ignore_status: bool = False, name: O
     if hasattr(param, "ds_id"):
         if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
             if not ignore_status:
-                print(name, "no ignore status")
+                LOGGER.warning(f"{name}: param.ds_status != ZeroParamStatus.NOT_AVAILABLE: {param.ds_status}.")
         with zero.GatheredParameters([param]):
             param = param.data.detach().cpu().clone()
     else:
