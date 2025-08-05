@@ -12,8 +12,9 @@
 # limitations under the License.
 # ==============================================================================
 from datetime import timedelta
-from typing import Any, Optional
 from functools import partial
+from typing import Any, Optional
+
 import bitsandbytes
 import datasets
 import torch
@@ -109,8 +110,6 @@ class LLaVATrainer(Trainer):
         if is_sagemaker_mp_enabled():
             return super().create_optimizer()
 
-        opt_model = self.model
-
         if self.optimizer is None:
             decay_parameters = get_parameter_names(self.model, ALL_LAYERNORM_LAYERS)
             decay_parameters = [name for name in decay_parameters if "bias" not in name]
@@ -189,7 +188,7 @@ class LLaVATrainer(Trainer):
             if optimizer_cls.__name__ == "Adam8bit":
                 manager = bitsandbytes.optim.GlobalOptimManager.get_instance()
                 skipped = 0
-                for module in opt_model.modules():
+                for module in self.model.modules():
                     if isinstance(module, nn.Embedding):
                         skipped += sum({p.data_ptr(): p.numel() for p in module.parameters()}.values())
                         LOGGER.info(f"Skipped {module}: {skipped / 2 ** 20}M params.")
@@ -208,27 +207,25 @@ class LLaVATrainer(Trainer):
         if self.train_dataset is None:
             raise ValueError("Trainer: training requires a train_dataset.")
 
-        train_dataset = self.train_dataset
-        data_collator = self.data_collator
-        if isinstance(train_dataset, datasets.Dataset):
-            train_dataset = self._remove_unused_columns(train_dataset, description="training")
+        if isinstance(self.train_dataset, datasets.Dataset):
+            self.train_dataset = self._remove_unused_columns(self.train_dataset, description="training")
         else:
-            data_collator = self._get_collator_with_removed_columns(data_collator, description="training")
+            self.data_collator = self._get_collator_with_removed_columns(self.data_collator, description="training")
 
         dataloader_params = {
             "batch_size": self._train_batch_size,
-            "collate_fn": data_collator,
+            "collate_fn": self.data_collator,
             "num_workers": self.args.dataloader_num_workers,
             "pin_memory": self.args.dataloader_pin_memory,
             "persistent_workers": self.args.dataloader_persistent_workers,
         }
 
-        if not isinstance(train_dataset, torch.utils.data.IterableDataset):
+        if not isinstance(self.train_dataset, torch.utils.data.IterableDataset):
             dataloader_params["sampler"] = self._get_train_sampler()
             dataloader_params["drop_last"] = self.args.dataloader_drop_last
             dataloader_params["worker_init_fn"] = partial(seed_worker, self.args.dataloader_num_workers, self.args.process_index)
             dataloader_params["prefetch_factor"] = self.args.dataloader_num_workers * 2 if self.args.dataloader_num_workers != 0 else None
 
-        dataloader = self.accelerator.prepare(torch.utils.data.DataLoader(train_dataset, **dataloader_params))
+        dataloader = self.accelerator.prepare(torch.utils.data.DataLoader(self.train_dataset, **dataloader_params))
 
         return dataloader
