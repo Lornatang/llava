@@ -47,7 +47,10 @@ class Conversation:
     sep_style: SeparatorStyle = SeparatorStyle.VICUNA_V1
     sep: Optional[str] = None
     sep2: Optional[str] = None
+    tokenizer_id: str = ""
+    tokenizer: Any = None
     stop_str: Optional[Union[str, List[str]]] = None
+    stop_token_ids: Optional[List[int]] = None
     skip_next: bool = False
     version: str = "Unknown"
 
@@ -296,7 +299,10 @@ class Conversation:
             sep_style=self.sep_style,
             sep=self.sep,
             sep2=self.sep2,
+            tokenizer_id=self.tokenizer_id,
+            tokenizer=self.tokenizer,
             stop_str=self.stop_str,
+            stop_token_ids=self.stop_token_ids,
             skip_next=self.skip_next,
             version=self.version,
         )
@@ -309,26 +315,32 @@ class Conversation:
         """
         if len(self.get_images()) > 0:
             return {
-                "system_template": self.system_message,
+                "system_message": self.system_message,
                 "roles": self.roles,
                 "messages": [[x, y[0] if type(y) is tuple else y] for x, y in self.messages],
                 "offset": self.offset,
                 "sep_style": self.sep_style.name,
                 "sep": self.sep,
                 "sep2": self.sep2,
+                "tokenizer_id": self.tokenizer_id,
+                "tokenizer": self.tokenizer_id,
                 "stop_str": self.stop_str,
+                "stop_token_ids": self.stop_token_ids,
                 "skip_next": self.skip_next,
                 "version": self.version,
             }
         return {
-            "system_template": self.system_message,
+            "system_message": self.system_message,
             "roles": self.roles,
             "messages": self.messages,
             "offset": self.offset,
             "sep_style": self.sep_style.name,
             "sep": self.sep,
             "sep2": self.sep2,
+            "tokenizer_id": self.tokenizer_id,
+            "tokenizer": self.tokenizer_id,
             "stop_str": self.stop_str,
+            "stop_token_ids": self.stop_token_ids,
             "skip_next": self.skip_next,
             "version": self.version,
         }
@@ -342,7 +354,10 @@ conv_llava_plain = Conversation(
     sep_style=SeparatorStyle.PLAIN,
     sep="\n",
     sep2=None,
+    tokenizer_id="",
+    tokenizer=None,
     stop_str=None,
+    stop_token_ids=None,
     skip_next=False,
     version="llava_plain",
 )
@@ -355,7 +370,10 @@ conv_llava_vicuna_v1 = Conversation(
     sep_style=SeparatorStyle.VICUNA_V1,
     sep=" ",
     sep2="</s>",
+    tokenizer_id="",
+    tokenizer=None,
     stop_str=None,
+    stop_token_ids=None,
     skip_next=False,
     version="llava_vicuna_v1",
 )
@@ -369,7 +387,10 @@ conv_llava_vicuna_v1_mmtag = Conversation(
     sep_style=SeparatorStyle.VICUNA_V1,
     sep=" ",
     sep2="</s>",
+    tokenizer_id="",
+    tokenizer=None,
     stop_str=None,
+    stop_token_ids=None,
     skip_next=False,
     version="llava_vicuna_v1_mmtag",
 )
@@ -382,7 +403,10 @@ conv_llava_llama = Conversation(
     sep_style=SeparatorStyle.LLAMA,
     sep="<s>",
     sep2="</s>",
+    tokenizer_id="",
+    tokenizer=None,
     stop_str=None,
+    stop_token_ids=None,
     skip_next=False,
     version="llava_llama",
 )
@@ -394,7 +418,10 @@ conv_llava_qwen2 = Conversation(
     sep_style=SeparatorStyle.CHATML,
     sep="<|im_end|>",
     sep2=None,
+    tokenizer_id="",
+    tokenizer=None,
     stop_str=None,
+    stop_token_ids=None,
     skip_next=False,
     version="llava_qwen2",
 )
@@ -408,7 +435,10 @@ conv_vicuna_v1 = Conversation(
     sep_style=SeparatorStyle.VICUNA_V1,
     sep=" ",
     sep2="</s>",
+    tokenizer_id="",
+    tokenizer=None,
     stop_str=None,
+    stop_token_ids=None,
     skip_next=False,
     version="vicuna_v1",
 )
@@ -423,7 +453,10 @@ conv_llama = Conversation(
     sep_style=SeparatorStyle.LLAMA,
     sep="<s>",
     sep2="</s>",
+    tokenizer_id="",
+    tokenizer=None,
     stop_str=None,
+    stop_token_ids=None,
     skip_next=False,
     version="llama",
 )
@@ -435,7 +468,10 @@ conv_qwen2 = Conversation(
     sep_style=SeparatorStyle.CHATML,
     sep="<|im_end|>",
     sep2=None,
+    tokenizer_id="",
+    tokenizer=None,
     stop_str=None,
+    stop_token_ids=None,
     skip_next=False,
     version="qwen2",
 )
