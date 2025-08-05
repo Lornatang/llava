@@ -30,6 +30,9 @@ classifiers = [
 
 # Required dependencies
 dependencies = [
+    "accelerate>0.23.0",
+    "bitsandbytes",
+    "datasets",
     "deepspeed",
     "einops_exts",
     "flash-attn>2.8.0",
