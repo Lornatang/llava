@@ -1,4 +1,13 @@
-deepspeed ./tools/train.py \
+export OMP_NUM_THREADS=8
+export NCCL_IB_DISABLE=0
+export NCCL_IB_GID_INDEX=3
+export NCCL_SOCKET_IFNAME=eno1
+export NCCL_DEBUG=INFO
+
+export ACCELERATE_CPU_AFFINITY=1
+
+torchrun --nproc_per_node=1 --nnodes=1 --node_rank=0 --master_addr=127.0.0.1 --master_port=10000 \
+    ./tools/train.py \
     --deepspeed ./tools/zero3.json \
     --model_name_or_path ./results/pretrained_models/lmsys/vicuna-13b-v1.5 \
     --version llava_plain \
