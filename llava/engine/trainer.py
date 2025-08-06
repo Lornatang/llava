@@ -75,7 +75,7 @@ class LLaVATrainer(Trainer):
                 lengths,
                 group_by_modality_auto=True,
             )
-        elif self.args.group_by_varlen:
+        elif self.args.group_by_variable_length:
             lengths = self.train_dataset.lengths
             return LengthGroupedSampler(
                 self.args.train_batch_size * self.args.gradient_accumulation_steps,

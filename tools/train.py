@@ -83,7 +83,7 @@ def _mask_targets(target: torch.Tensor, tokenized_lens: List[int], speakers: Lis
     target[:cur_idx] = IGNORE_INDEX
     for tokenized_len, speaker in zip(tokenized_lens, speakers):
         if speaker == "human":
-            target[cur_idx + 2:cur_idx + tokenized_len] = IGNORE_INDEX
+            target[cur_idx + 2: cur_idx + tokenized_len] = IGNORE_INDEX
         cur_idx += tokenized_len
 
 
@@ -98,8 +98,8 @@ def _add_speaker_and_signal(header: str, source: List, get_conversation: bool = 
     Returns:
         str: The formatted conversation string with speakers and signals added.
     """
-    BEGIN_SIGNAL = "### "
-    END_SIGNAL = "\n"
+    begin_signal = "### "
+    end_signal = "\n"
     conversation = header
     for sentence in source:
         from_str = sentence["from"]
@@ -109,10 +109,10 @@ def _add_speaker_and_signal(header: str, source: List, get_conversation: bool = 
             from_str = conversation_lib.default_conversation.roles[1]
         else:
             from_str = "unknown"
-        sentence["value"] = (BEGIN_SIGNAL + from_str + ": " + sentence["value"] + END_SIGNAL)
+        sentence["value"] = begin_signal + from_str + ": " + sentence["value"] + end_signal
         if get_conversation:
             conversation += sentence["value"]
-    conversation += BEGIN_SIGNAL
+    conversation += begin_signal
     return conversation
 
 
@@ -209,23 +209,54 @@ class DataCollatorForSupervisedDataset(object):
             Dict[str, torch.Tensor]: A dictionary containing the collated input IDs, labels, attention mask, and optionally images.
         """
         input_ids, labels = tuple([instance[key] for instance in instances] for key in ("input_ids", "labels"))
-        input_ids = torch.nn.utils.rnn.pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
-        labels = torch.nn.utils.rnn.pad_sequence(labels, batch_first=True, padding_value=IGNORE_INDEX)
-        input_ids = input_ids[:, :self.tokenizer.model_max_length]
-        labels = labels[:, :self.tokenizer.model_max_length]
-        batch = dict(
-            input_ids=input_ids,
-            labels=labels,
-            attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
-        )
+        input_ids = [_input_ids[: self.tokenizer.model_max_length] for _input_ids in input_ids]
+        labels = [_labels[: self.tokenizer.model_max_length] for _labels in labels]
+        if self.tokenizer.pad_token_id is None:
+            self.tokenizer.pad_token_id = 0
+        input_ids = self.pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
+        labels = self.pad_sequence(labels, batch_first=True, padding_value=IGNORE_INDEX)
+        batch = dict(input_ids=input_ids, labels=labels.long() if labels.dtype == torch.int32 else labels,
+                     attention_mask=input_ids.ne(self.tokenizer.pad_token_id))
 
         if "image" in instances[0]:
             images = [instance["image"] for instance in instances]
-            if all(x is not None and x.shape == images[0].shape for x in images):
-                batch["images"] = torch.stack(images)
-            else:
-                batch["images"] = images
+            batch["image_sizes"] = [image[1] for image_list in images for image in image_list]
+            batch["modalities"] = [image[2] for image_list in images for image in image_list]
+            images = [image[0] for image_list in images for image in image_list]
+            batch["images"] = images
+
+        if "prompt" in instances[0]:
+            batch["prompts"] = [instance["prompt"] for instance in instances]
+
         return batch
+
+    def pad_sequence(
+            self,
+            input_ids: Sequence[torch.Tensor],
+            batch_first: bool,
+            padding_value: Union[int, float],
+    ) -> torch.Tensor:
+        """Pad a list of variable‑length token‑ID tensors.
+
+        This helper mirrors the behaviour of ``torch.nn.utils.rnn.pad_sequence`` but
+        respects the ``tokenizer.padding_side`` attribute.  When the tokenizer
+        pads on the *left*, each sequence is flipped before padding and the final
+        batch tensor is flipped back so that the padding stays on the left side.
+
+        Args:
+            input_ids (Sequence): A sequence of variable‑length token‑ID tensors to be padded.
+            batch_first (bool, optional): If ``True``, then the tensors must have the shape.
+            padding_value (Union[int, float]): The value to use for padding.
+
+        Returns:
+            torch.Tensor: The padded tensor whose shape is determined by ``batch_first``.
+        """
+        if self.tokenizer.padding_side == "left":
+            input_ids = [torch.flip(_input_ids, [0]) for _input_ids in input_ids]
+        input_ids = torch.nn.utils.rnn.pad_sequence(input_ids, batch_first=batch_first, padding_value=padding_value)
+        if self.tokenizer.padding_side == "left":
+            input_ids = torch.flip(input_ids, [1])
+        return input_ids
 
 
 @dataclass
@@ -261,7 +292,7 @@ class TrainingArguments(transformers.TrainingArguments):
     lora_bias: str = "none"
     mm_projector_lr: Optional[float] = None
     mm_vision_tower_lr: Optional[float] = None
-    group_by_varlen: bool = field(default=False)
+    group_by_variable_length: bool = field(default=False)
     group_by_modality_length: bool = field(default=False)
     group_by_modality_length_auto: bool = field(default=False)
     auto_find_batch_size: bool = field(default=False)
