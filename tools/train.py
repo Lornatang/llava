@@ -13,14 +13,19 @@
 # ==============================================================================
 import copy
 import json
+import random
 import re
+import time
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
+import math
 import torch
 import torch.utils.data
 import transformers
+import yaml
 from PIL import Image, ImageFile
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from peft.tuners.lora import LoraLayer
@@ -29,10 +34,12 @@ from llava import conversation as conversation_lib
 from llava.constants import IMAGE_TOKEN_INDEX, IGNORE_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.engine.trainer import LLaVATrainer
 from llava.models.llm import LlavaLlamaForCausalLM, LlavaQwen2ForCausalLM
+from llava.utils import convert_expand_to_square
 from llava.utils.checkpoint import safe_save_model_for_hf_trainer
+from llava.utils.events import LOGGER
 from llava.utils.ops import (
-    convert_expand_to_square, find_all_linear_names, get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3, rank0_print,
-    tokenizer_image_token,
+    find_all_linear_names, get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3, process_anyres_image, process_highres_image,
+    process_highres_image_crop_split, rank0_print, tokenizer_image_token,
 )
 
 torch.multiprocessing.set_sharing_strategy("file_system")
@@ -326,48 +333,106 @@ class LazySupervisedDataset(torch.utils.data.Dataset):
         self.list_data_dict: List[Dict[str, str]] = json.load(open(data_path, "r"))
         self.data_args: DataArguments = data_args
 
-    def __getitem__(self, i: int) -> Dict[str, torch.Tensor]:
+        if "{" in data_path and "}" in data_path:
+            base_path, file_pattern = re.match(r"^(.*)\{(.*)}\.json$", data_path).groups()
+            file_names = file_pattern.split(",")
+            rank0_print(f"Loading {file_names} from {base_path}.")
+            self.data_args.dataset_paths = []
+            for file_name in file_names:
+                self.data_args.dataset_paths.append(f"{base_path}{file_name}.json")
+                full_path = f"{base_path}{file_name}.json"
+                rank0_print(f"Loading {full_path}")
+                with open(full_path, "r") as file:
+                    cur_data_dict = json.load(file)
+                    rank0_print(f"Loaded {len(cur_data_dict)} samples from {full_path}")
+                    self.list_data_dict.extend(cur_data_dict)
+        elif data_path.endswith(".yaml"):
+            with open(data_path, "r") as file:
+                yaml_data = yaml.safe_load(file)
+                datasets = yaml_data.get("datasets")
+                self.data_args.dataset_paths = [dataset.get("json_path") for dataset in datasets]
+                for dataset in datasets:
+                    json_path = dataset.get("json_path")
+                    sampling_strategy = dataset.get("sampling_strategy", "all")
+                    sampling_number = None
+
+                    rank0_print(f"Loading {json_path} with {sampling_strategy} sampling strategy.")
+
+                    if json_path.endswith(".jsonl"):
+                        cur_data_dict = []
+                        with open(json_path, "r") as json_file:
+                            for line in json_file:
+                                cur_data_dict.append(json.loads(line.strip()))
+                    elif json_path.endswith(".json"):
+                        with open(json_path, "r") as json_file:
+                            cur_data_dict = json.load(json_file)
+                    else:
+                        raise ValueError(f"Unsupported file type: {json_path}")
+
+                    if ":" in sampling_strategy:
+                        sampling_strategy, sampling_number = sampling_strategy.split(":")
+                        if "%" in sampling_number:
+                            sampling_number = math.ceil(int(sampling_number.split("%")[0]) * len(cur_data_dict) / 100)
+                        else:
+                            sampling_number = int(sampling_number)
+
+                    # Apply the sampling strategy.
+                    if sampling_strategy == "first" and sampling_number is not None:
+                        cur_data_dict = cur_data_dict[:sampling_number]
+                    elif sampling_strategy == "end" and sampling_number is not None:
+                        cur_data_dict = cur_data_dict[-sampling_number:]
+                    elif sampling_strategy == "random" and sampling_number is not None:
+                        random.shuffle(cur_data_dict)
+                        cur_data_dict = cur_data_dict[:sampling_number]
+
+                    rank0_print(f"Loaded {len(cur_data_dict)} samples from {json_path}")
+                    self.list_data_dict.extend(cur_data_dict)
+        else:
+            self.data_args.dataset_paths = [data_path]
+            rank0_print(f"Loading {data_path}")
+            with open(data_path, "r") as file:
+                cur_data_dict = json.load(file)
+                rank0_print(f"Loaded {len(cur_data_dict)} samples from {data_path}")
+                self.list_data_dict.extend(cur_data_dict)
+
+        rank0_print(f"Loaded {len(self.list_data_dict)} samples from {data_path}.")
+        rank0_print("Formatting inputs...Skip in lazy mode.")
+
+    def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
         """Get an item from the dataset.
 
         Args:
-            i (int): The index of the item to retrieve.
+            index (int): The index of the item to retrieve.
 
         Returns:
             Dict[str, torch.Tensor]: A dictionary containing the input IDs, labels, and optionally images.
         """
-        sources = self.list_data_dict[i]
-        if isinstance(i, int):
-            sources = [sources]
-        assert len(sources) == 1, "Don't know why it is wrapped to a list"
-        image = None
-        if "image" in sources[0]:
-            image_file = self.list_data_dict[i]["image"]
-            image_folder = self.data_args.image_folder
-            processor = self.data_args.image_processor
-            image = Image.open(Path(image_folder, image_file)).convert("RGB")
-            if self.data_args.image_aspect_ratio == "pad":
-                image = convert_expand_to_square(image, tuple(int(x * 255) for x in processor.image_mean))
-                image = processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
-            else:
-                image = processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
-            sources = preprocess_multimodal(
-                copy.deepcopy([e["conversations"] for e in sources]),
-                self.data_args)
-        else:
-            sources = copy.deepcopy([e["conversations"] for e in sources])
+        num_base_retries = 3
 
-        data_dict = preprocess(sources, self.tokenizer, ("image" in self.list_data_dict[i]))
-        if isinstance(i, int):
-            data_dict = dict(input_ids=data_dict["input_ids"][0], labels=data_dict["labels"][0])
+        for attempt_index in range(num_base_retries):
+            try:
+                sample = self._get_item(index)
+                return sample
+            except Exception as e:
+                LOGGER.exception(f"Try [#{attempt_index}] failed to fetch sample {index}. {e}.")
+                time.sleep(1)
 
-        # Image exists in the data.
-        if "image" in self.list_data_dict[i]:
-            data_dict["image"] = image
-        elif self.data_args.is_multimodal:
-            # The image does not exist in the data, but the model is multimodal
-            crop_size = self.data_args.image_processor.crop_size
-            data_dict["image"] = torch.zeros(3, crop_size["height"], crop_size["width"])
-        return data_dict
+        # try other samples, in case it is file corruption issue
+        next_index = 0
+        for attempt_index in range(num_base_retries):
+            try:
+                next_index = min(index + 1, len(self.list_data_dict) - 1)
+                sample = self._get_item(next_index)
+                return sample
+            except Exception as e:
+                LOGGER.exception(f"Try other [#{attempt_index}] failed to fetch sample {next_index}. {e}.")
+                pass
+
+        try:
+            sample = self._get_item(index)
+            return sample
+        except Exception as e:
+            raise e
 
     def __len__(self) -> int:
         """Return the length of the dataset.
@@ -376,6 +441,107 @@ class LazySupervisedDataset(torch.utils.data.Dataset):
             int: The number of samples in the dataset.
         """
         return len(self.list_data_dict)
+
+    def _get_item(self, index) -> Dict[str, torch.Tensor]:
+        sources = self.list_data_dict[index]
+        if isinstance(index, int):
+            sources = [sources]
+        assert len(sources) == 1, "Don't know why it is wrapped to a list."
+
+        if "image" in sources[0]:
+            image_file = self.list_data_dict[index]["image"]
+            if type(image_file) is list:
+                image = [self.process_image(f) for f in image_file]
+                if len(image_file) > 1:
+                    image = [self.process_image(f, "pad") for f in image_file]
+                    image = [[img[0], img[1], "image"] for img in image]
+            else:
+                image = [self.process_image(image_file)]
+
+            sources = preprocess_multimodal(deepcopy([e["conversations"] for e in sources]), self.data_args)
+        # TODO: implements it.
+        # elif "video" in sources[0]:
+        #     video_file = self.list_data_dict[index]["video"]
+        #     video_folder = self.data_args.video_folder
+        #     video_file = os.path.join(video_folder, video_file)
+        #     if not os.path.exists(video_file):
+        #         LOGGER.error(f"File {video_file} not exist!")
+        #
+        #     try:
+        #         if "shareVideoGPTV" in video_file:
+        #             frame_files = [os.path.join(video_file, f) for f in os.listdir(video_file) if os.path.isfile(os.path.join(video_file, f))]
+        #             frame_files.sort()
+        #
+        #             if self.data_args.force_sample:
+        #                 num_frames_to_sample = self.data_args.frames_upbound
+        #             else:
+        #                 num_frames_to_sample = 10
+        #
+        #             avg_fps = 2
+        #             total_frames = len(frame_files)
+        #             sampled_indices = np.linspace(0, total_frames - 1, num_frames_to_sample, dtype=int)
+        #             frame_time = [i / 2 for i in sampled_indices]
+        #             frame_time = ",".join([f"{i:.2f}s" for i in frame_time])
+        #             video_time = total_frames / avg_fps
+        #
+        #             # Read and store the sampled frames.
+        #             video = []
+        #             for index in sampled_indices:
+        #                 frame_path = frame_files[index]
+        #                 try:
+        #                     with Image.open(frame_path) as img:
+        #                         frame = img.convert("RGB")
+        #                         video.append(frame)
+        #                 except IOError as e:
+        #                     LOGGER.exception(f"Failed to read frame at path: {frame_path}. {e}.")
+        #         else:
+        #             video, video_time, frame_time, num_frames_to_sample = process_video_with_decord(video_file, self.data_args)
+        #
+        #         processor = self.data_args.image_processor
+        #         image = processor.preprocess(video, return_tensors="pt")["pixel_values"]
+        #         if self.data_args.add_time_instruction:
+        #             time_instruction = f"The video lasts for {video_time:.2f} seconds, and {num_frames_to_sample} frames are uniformly sampled from it. These frames are located at {frame_time}.Please answer the following questions related to this video."
+        #             sources[0]["conversations"][0][
+        #                 "value"] = f'{DEFAULT_IMAGE_TOKEN}\n{time_instruction}\n{sources[0]["conversations"][0]["value"].replace(DEFAULT_IMAGE_TOKEN, "")}'
+        #         image = [(image, video[0].size, "video")]
+        #         sources = preprocess_multimodal(deepcopy([e["conversations"] for e in sources]), self.data_args)
+        #     except Exception as e:
+        #         LOGGER.exception(f"Failed to read video file: {video_file}. {e}.")
+        #         return self._get_item(index + 1)
+        else:
+            sources = deepcopy([e["conversations"] for e in sources])
+
+        # TODO: implements it.
+        # has_image = ("image" in self.list_data_dict[index]) or ("video" in self.list_data_dict[index])
+        has_image = "image" in self.list_data_dict[index]
+        data_dict = preprocess(sources, self.tokenizer, has_image=has_image)
+
+        if "prompt" in data_dict:
+            prompt = data_dict["prompt"]
+        else:
+            prompt = None
+
+        if isinstance(index, int):
+            data_dict = dict(input_ids=data_dict["input_ids"][0], labels=data_dict["labels"][0])
+
+        # image exist in the data
+        if "image" in self.list_data_dict[index]:
+            data_dict["image"] = image
+        # TODO: implements it.
+        # elif "video" in self.list_data_dict[index]:
+        #     data_dict["image"] = image
+        elif self.data_args.is_multimodal:
+            crop_size = self.data_args.image_processor.crop_size
+            data_dict["image"] = [
+                (torch.zeros(1, 3, crop_size["height"], crop_size["width"]), (crop_size["width"], crop_size["height"]), "text"),
+            ]
+
+        # prompt exist in the data.
+        if prompt is not None:
+            data_dict["prompt"] = prompt
+
+        data_dict["id"] = self.list_data_dict[index].get("id", index)
+        return data_dict
 
     @property
     def lengths(self) -> List[int]:
@@ -401,9 +567,48 @@ class LazySupervisedDataset(torch.utils.data.Dataset):
         length_list = []
         for sample in self.list_data_dict:
             cur_len = sum(len(conv["value"].split()) for conv in sample["conversations"])
-            cur_len = cur_len if "image" in sample else -cur_len
-            length_list.append(cur_len)
+            assert cur_len > 0, f"Conversation length is 0 for {sample}"
+            if "image" in sample or "video" in sample or self.data_args.early_mix_text:
+                length_list.append(cur_len)
+            else:
+                length_list.append(-cur_len)
         return length_list
+
+    def process_image(
+            self,
+            image_file: str,
+            overwrite_image_aspect_ratio: Optional[str] = None
+    ) -> Tuple[Any, Any, str]:
+        """Helper function to process an image.
+
+        Args:
+            image_file (str): The image file name.
+            overwrite_image_aspect_ratio (Optional[str], optional): If provided, overwrite the default image aspect ratio. Defaults to ``None``.
+
+        Returns:
+            Tuple[Any, Any, str]: A tuple containing the processed image tensor, original image size, and modality type.
+        """
+        try:
+            image = Image.open(str(Path(self.data_args.image_folder, image_file))).convert("RGB")
+        except Exception as e:
+            LOGGER.exception(f"Failed to open image {image_file}. {e}.")
+            raise e
+
+        if overwrite_image_aspect_ratio is not None:
+            self.data_args.image_aspect_ratio = overwrite_image_aspect_ratio
+
+        if self.data_args.image_aspect_ratio == "highres":
+            image = process_highres_image(image, self.data_args.image_processor, self.data_args.image_grid_pinpoints)
+        elif "anyres" in self.data_args.image_aspect_ratio:
+            image = process_anyres_image(image, self.data_args.image_processor, self.data_args.image_grid_pinpoints)
+        elif self.data_args.image_aspect_ratio == "crop_split":
+            image = process_highres_image_crop_split(image, self.data_args)
+        elif self.data_args.image_aspect_ratio == "pad":
+            image = convert_expand_to_square(image, tuple(int(x * 255) for x in self.data_args.image_processor.image_mean))
+            image = self.data_args.image_processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
+        else:
+            image = self.data_args.image_processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
+        return image, image.size, "image"
 
 
 def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, data_args: DataArguments) -> Dict[str, torch.utils.data.Dataset]:
@@ -467,7 +672,7 @@ def preprocess(
         conversations_tokenized = _tokenize_fn(conversations, tokenizer)
         input_ids = conversations_tokenized["input_ids"]
 
-    targets = copy.deepcopy(input_ids)
+    targets = deepcopy(input_ids)
     for target, source in zip(targets, sources):
         if has_image:
             tokenized_lens = get_tokenize_len([header] + [s["value"] for s in source])
@@ -483,13 +688,13 @@ def preprocess(
 
 
 def preprocess_multimodal(
-        sources: Dict[str, List[Dict[str, str]]],
+        sources: Union[Dict[str, List[Dict[str, str]]], List[str]],
         data_args: DataArguments,
 ) -> Dict[str, List[Dict[str, str]]]:
     """Preprocess conversations for multimodal fine-tuning.
 
     Args:
-        sources (Dict[str, List[Dict[str, str]]]): A list of conversations, each conversation is a list of sentences.
+        sources (Union[Dict[str, List[Dict[str, str]]], List[str]]): A list of conversations, each conversation is a list of sentences.
         data_args (DataArguments): The data arguments containing multimodal configurations.
 
     Returns:
@@ -539,7 +744,7 @@ def preprocess_plain(
         conversations.append(conversation)
 
     input_ids = [tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations]
-    targets = copy.deepcopy(input_ids)
+    targets = deepcopy(input_ids)
     for target, source in zip(targets, sources):
         tokenized_len = len(tokenizer_image_token(source[0]["value"], tokenizer))
         target[:tokenized_len] = IGNORE_INDEX

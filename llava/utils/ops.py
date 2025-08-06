@@ -13,10 +13,10 @@
 # ==============================================================================
 import ast
 import base64
-import math
 from io import BytesIO
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
+import math
 import requests
 import torch
 import torch.distributed as dist
@@ -29,19 +29,19 @@ from llava.constants import IMAGE_TOKEN_INDEX
 from .events import LOGGER
 
 __all__ = [
-    "convert_expand_to_square", "divide_to_patches", "find_all_linear_names", "load_image", "load_image_from_base64", "get_anyres_image_grid_shape",
+    "convert_expand_to_square", "divide_to_patches", "extract_patches", "find_all_linear_names", "get_anyres_image_grid_shape",
     "get_model_name_from_path", "get_peft_state_maybe_zero_3", "get_peft_state_non_lora_maybe_zero_3", "get_mm_adapter_state_maybe_zero_3",
-    "maybe_zero_3", "process_anyres_image", "process_images", "rank0_print", "resize_and_pad_image", "select_best_resolution", "split_to_even_chunks",
-    "tokenizer_image_token", "unpad_image",
+    "load_image", "load_image_from_base64", "maybe_zero_3", "process_anyres_image", "process_highres_image", "process_highres_image_crop_split",
+    "process_images", "rank0_print", "resize_and_pad_image", "select_best_resolution", "split_to_even_chunks", "tokenizer_image_token", "unpad_image",
 ]
 
 
-def convert_expand_to_square(pil_image: Image.Image, background_color: Union[Tuple[int, int, int], int]) -> Image.Image:
+def convert_expand_to_square(pil_image: Image.Image, background_color: Union[Tuple[int, ...], int]) -> Image.Image:
     """Expands a PIL image to a square by padding with a background color.
 
     Args:
         pil_image (PIL.Image.Image): The input image.
-        background_color (Union[Tuple[int, int, int], int]): The background color for padding.
+        background_color (Union[Tuple[int, ...], int]): The background color for padding.
 
     Returns:
         PIL.Image.Image: The squared image.
@@ -80,6 +80,48 @@ def divide_to_patches(image: Image.Image, patch_size: int) -> List[Image.Image]:
     return patches
 
 
+def extract_patches(
+        image: Image.Image,
+        patch_size: int,
+        overlap_ratio: float
+) -> List[Image.Image]:
+    """Split an image into square patches with optional overlap.
+
+    Args:
+        image (Image.Image): A Pillow Image to extract patches from.
+        patch_size (int): The height and width of each square patch, must be > 0.
+        overlap_ratio (float): Fraction of overlap between adjacent patches, must satisfy 0 <= overlap_ratio < 1.
+
+    Returns:
+        List[Image.Image]: A list of image patches of size patch_size x patch_size.
+    """
+    assert isinstance(image, Image.Image), "Input should be a Pillow Image"
+    assert patch_size > 0, "Patch size should be greater than 0"
+    assert 0 <= overlap_ratio < 1, "Overlap ratio should be between 0 and 1"
+
+    width, height = image.size
+    patches = []
+
+    # Compute stride based on overlap.
+    stride = int(patch_size * (1 - overlap_ratio))
+
+    # Number of patches along each dimension.
+    num_patches_y = (height - patch_size) // stride + 1
+    num_patches_x = (width - patch_size) // stride + 1
+
+    # Compute starting offsets to center the grid.
+    y_start = (height - (num_patches_y - 1) * stride - patch_size) // 2
+    x_start = (width - (num_patches_x - 1) * stride - patch_size) // 2
+
+    # Extract patches.
+    for y in range(y_start, y_start + num_patches_y * stride, stride):
+        for x in range(x_start, x_start + num_patches_x * stride, stride):
+            patch = image.crop((x, y, x + patch_size, y + patch_size))
+            patches.append(patch)
+
+    return patches
+
+
 def find_all_linear_names(model: transformers.PreTrainedModel) -> List[str]:
     """Find all linear module names in the model.
 
@@ -102,43 +144,6 @@ def find_all_linear_names(model: transformers.PreTrainedModel) -> List[str]:
     if "lm_head" in lora_module_names:  # needed for 16-bit
         lora_module_names.remove("lm_head")
     return list(lora_module_names)
-
-
-def load_image(image_file) -> Image.Image:
-    """Load an image from a local file path or a URL.
-
-    Args:
-        image_file (str): Path to the image file or a URL.
-
-    Returns:
-        Image.Image: Loaded image in RGB mode.
-
-    Raises:
-        IOError: If the image cannot be opened.
-        requests.RequestException: If the image URL cannot be fetched.
-    """
-    try:
-        if image_file.startswith(("http://", "https://")):
-            response = requests.get(image_file)
-            response.raise_for_status()
-            image = Image.open(BytesIO(response.content))
-        else:
-            image = Image.open(image_file)
-        return image.convert("RGB")
-    except Exception as e:
-        raise IOError(f"Failed to load image from {image_file}: {e}")
-
-
-def load_image_from_base64(image: str) -> Image.Image:
-    """Loads an image from a base64-encoded string.
-
-    Args:
-        image (str): Base64-encoded image string.
-
-    Returns:
-        PIL.Image.Image: The loaded image.
-    """
-    return Image.open(BytesIO(base64.b64decode(image)))
 
 
 def get_anyres_image_grid_shape(
@@ -254,6 +259,43 @@ def get_mm_adapter_state_maybe_zero_3(
     return to_return
 
 
+def load_image(image_file) -> Image.Image:
+    """Load an image from a local file path or a URL.
+
+    Args:
+        image_file (str): Path to the image file or a URL.
+
+    Returns:
+        Image.Image: Loaded image in RGB mode.
+
+    Raises:
+        IOError: If the image cannot be opened.
+        requests.RequestException: If the image URL cannot be fetched.
+    """
+    try:
+        if image_file.startswith(("http://", "https://")):
+            response = requests.get(image_file)
+            response.raise_for_status()
+            image = Image.open(BytesIO(response.content))
+        else:
+            image = Image.open(image_file)
+        return image.convert("RGB")
+    except Exception as e:
+        raise IOError(f"Failed to load image from {image_file}: {e}")
+
+
+def load_image_from_base64(image: str) -> Image.Image:
+    """Loads an image from a base64-encoded string.
+
+    Args:
+        image (str): Base64-encoded image string.
+
+    Returns:
+        PIL.Image.Image: The loaded image.
+    """
+    return Image.open(BytesIO(base64.b64decode(image)))
+
+
 def maybe_zero_3(param: torch.nn.Parameter, ignore_status: bool = False, name: Optional[str] = None) -> torch.Tensor:
     """Safely gathers and clones a parameter, handling DeepSpeed Zero-3 status.
 
@@ -301,6 +343,67 @@ def process_anyres_image(
     patches = divide_to_patches(image_padded, processor.crop_size["height"])
     image_original_resize = image.resize((processor.size["shortest_edge"], processor.size["shortest_edge"]))
     image_patches = [image_original_resize] + patches
+    image_patches = [processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in image_patches]
+    return torch.stack(image_patches, dim=0)
+
+
+def process_highres_image(
+        image: Image.Image,
+        processor: Any,
+        grid_pinpoints: str
+) -> torch.Tensor:
+    """Preprocess a high-resolution image by padding or resizing to a target grid size, extracting patches of uniform size, and returning a batched tensor.
+
+    Args:
+        image (Image.Image): The input high-resolution image.
+        processor (Any): An image processor with attributes:
+            - image_mean (List[float]): Mean values for normalization (0-1 range).
+            - size (dict): Contains "shortest_edge" indicating patch size.
+            And a method:
+            - preprocess(image: Image.Image, return_tensors: str) -> dict: returns pixel_values tensor.
+        grid_pinpoints (str): Comma-separated candidate grid sizes, e.g. "224,448,672".
+
+    Returns:
+        torch.Tensor: A tensor of shape [num_patches + 1, C, H, W], where the first entry is the resized whole image and the rest are extracted patches.
+    """
+    grid_params = [int(x) for x in grid_pinpoints.split(",")]
+    # FIXME: always select the 448.
+    select_size = max(grid_params)
+    image_padded = convert_expand_to_square(image, tuple(int(x * 255) for x in processor.image_mean))
+
+    # FIXME: this seems to be a bug that it always resizes instead of padding.
+    image_original_resize = image.resize((processor.size["shortest_edge"], processor.size["shortest_edge"]))
+    image_padded = image_padded.resize((select_size, select_size))
+    image_patches = extract_patches(image_padded, patch_size=processor.size["shortest_edge"], overlap_ratio=0)
+    image_patches = [image_original_resize] + image_patches
+    image_patches = [processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in image_patches]
+    return torch.stack(image_patches, dim=0)
+
+
+def process_highres_image_crop_split(
+        image: Image.Image,
+        data_args: Any,
+        processor: Optional[Any] = None
+) -> torch.Tensor:
+    """
+    Resize and center-crop a high-resolution image, then split into uniform patches
+    and preprocess them into a batched tensor.
+
+    Args:
+        image (PIL.Image.Image): The input image to crop and split.
+        data_args (Any): An object containing configuration attributes:
+            - image_crop_resolution (Tuple[int, int]): Size to resize and crop the image.
+            - image_split_resolution (int): Patch size for splitting the image.
+            - image_processor: Default processor if none provided.
+        processor (Any, optional): An image processor with a preprocess method. If None, uses data_args.image_processor. Defaults to ``None``.
+
+    Returns:
+        torch.Tensor: A tensor of shape [num_patches, C, H, W] containing preprocessed patches.
+    """
+    if processor is None:
+        processor = data_args.image_processor
+    image_crop = resize_and_center_crop(image, data_args.image_crop_resolution)
+    image_patches = extract_patches(image_crop, patch_size=data_args.image_split_resolution, overlap_ratio=0)
     image_patches = [processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in image_patches]
     return torch.stack(image_patches, dim=0)
 
@@ -387,6 +490,38 @@ def resize_and_pad_image(
     new_image.paste(resized_image, (paste_x, paste_y))
 
     return new_image
+
+
+def resize_and_center_crop(
+        image: Image.Image,
+        shortest_edge_length: int
+) -> Image.Image:
+    """Resize an image to ensure the shorter edge matches shortest_edge_length, then center crop to a square of size shortest_edge_length x shortest_edge_length.
+
+    Args:
+        image (Image.Image): Input Pillow Image to resize and crop.
+        shortest_edge_length (int): Target size for the shorter edge, must be > 0.
+
+    Returns:
+        Image.Image: The resized and center-cropped image.
+    """
+    aspect_ratio = float(image.width) / float(image.height)
+    if aspect_ratio > 1:
+        new_width = int(shortest_edge_length * aspect_ratio)
+        new_height = shortest_edge_length
+    else:
+        new_width = shortest_edge_length
+        new_height = int(shortest_edge_length / aspect_ratio)
+    resized_image = image.resize((new_width, new_height), Image.ANTIALIAS)
+
+    # Calculate the position and perform the center crop.
+    left = (new_width - shortest_edge_length) / 2
+    top = (new_height - shortest_edge_length) / 2
+    right = (new_width + shortest_edge_length) / 2
+    bottom = (new_height + shortest_edge_length) / 2
+    cropped_image = resized_image.crop((left, top, right, bottom))
+
+    return cropped_image
 
 
 def select_best_resolution(
