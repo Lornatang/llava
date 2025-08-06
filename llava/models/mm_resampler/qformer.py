@@ -12,7 +12,7 @@
 # limitations under the License.
 # ==============================================================================
 import math
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import torch
 import torch.utils.checkpoint
