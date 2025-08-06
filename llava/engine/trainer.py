@@ -52,20 +52,42 @@ class LLaVATrainer(Trainer):
         if self.train_dataset is None or not has_length(self.train_dataset):
             return None
 
-        if self.args.group_by_modality_length:
+        if self.args.group_by_length:
+            lengths = self.train_dataset.lengths
+            return LengthGroupedSampler(
+                self.args.train_batch_size,
+                self.args.world_size * self.args.gradient_accumulation_steps,
+                lengths,
+            )
+        elif self.args.group_by_modality_length:
             lengths = self.train_dataset.modality_lengths
             return LengthGroupedSampler(
                 self.args.train_batch_size,
-                world_size=self.args.world_size * self.args.gradient_accumulation_steps,
-                lengths=lengths,
+                self.args.world_size * self.args.gradient_accumulation_steps,
+                lengths,
                 group_by_modality=True,
+            )
+        elif self.args.group_by_modality_length_auto:
+            lengths = self.train_dataset.modality_lengths
+            return LengthGroupedSampler(
+                self.args.train_batch_size,
+                self.args.world_size * self.args.gradient_accumulation_steps,
+                lengths,
+                group_by_modality_auto=True,
+            )
+        elif self.args.group_by_varlen:
+            lengths = self.train_dataset.lengths
+            return LengthGroupedSampler(
+                self.args.train_batch_size * self.args.gradient_accumulation_steps,
+                self.args.world_size * self.args.gradient_accumulation_steps,
+                lengths,
+                variable_length=True,
             )
         else:
             return super()._get_train_sampler()
 
     def create_accelerator_and_postprocess(self) -> None:
-        grad_acc_kwargs = {"num_steps": self.args.gradient_accumulation_steps}
-        grad_acc_kwargs["sync_with_dataloader"] = False
+        grad_acc_kwargs = {"num_steps": self.args.gradient_accumulation_steps, "sync_with_dataloader": False}
         gradient_accumulation_plugin = GradientAccumulationPlugin(**grad_acc_kwargs)
 
         accelerator_kwargs = InitProcessGroupKwargs(timeout=timedelta(weeks=52))
@@ -195,7 +217,6 @@ class LLaVATrainer(Trainer):
                         manager.register_module_override(module, "weight", {"optim_bits": 32})
                         LOGGER.debug(f"Bitsandbytes: will optimize {module} in fp32.")
                 LOGGER.info(f"Skipped: {skipped / 2 ** 20}M params.")
-
         return self.optimizer
 
     def get_train_dataloader(self) -> torch.utils.data.DataLoader:
