@@ -30,7 +30,7 @@ classifiers = [
 
 # Required dependencies
 dependencies = [
-    "accelerate>0.23.0",
+    "accelerate>=0.23.0",
     "bitsandbytes",
     "datasets",
     "deepspeed",
