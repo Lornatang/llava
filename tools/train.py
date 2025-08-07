@@ -1040,9 +1040,18 @@ def train(attn_implementation: str = None) -> None:
 
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+
+    if training_args.verbose_logging:
+        LOGGER.info(f"Inspecting experiment hyperparameters:\n")
+        LOGGER.info(f"model_args = {vars(model_args)}\n\n")
+        LOGGER.info(f"data_args = {vars(data_args)}\n\n")
+        LOGGER.info(f"training_args = {vars(training_args)}\n\n")
+
+    # Setting up the device and dtype.
     local_rank = training_args.local_rank
     compute_dtype = (torch.float16 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32))
 
+    # Setting up the quantization configuration.
     bnb_model_from_pretrained_args = {}
     if training_args.bits in [4, 8]:
         bnb_model_from_pretrained_args.update(
@@ -1053,15 +1062,59 @@ def train(attn_implementation: str = None) -> None:
                 quantization_config=transformers.BitsAndBytesConfig(
                     load_in_4bit=training_args.bits == 4,
                     load_in_8bit=training_args.bits == 8,
-                    llm_int8_skip_modules=["mm_projector"],
                     llm_int8_threshold=6.0,
                     llm_int8_has_fp16_weight=False,
                     bnb_4bit_compute_dtype=compute_dtype,
                     bnb_4bit_use_double_quant=training_args.double_quant,
                     bnb_4bit_quant_type=training_args.quant_type  # {"fp4", "nf4"}
-                )
+                ),
             )
         )
+
+    # Load model.
+    model = get_model(model_args, training_args, bnb_model_from_pretrained_args)
+    model.config.use_cache = False
+    if model_args.rope_scaling_factor is not None and model_args.rope_scaling_type is not None:
+        model.config.rope_scaling = {
+            "factor": model_args.rope_scaling_factor,
+            "type": model_args.rope_scaling_type,
+        }
+
+    # Train adapter or LoRA.
+    if model_args.freeze_backbone:
+        model.model.requires_grad_(False)
+
+    # If use 4/8bit training.
+    if training_args.bits in [4, 8]:
+        model.config.torch_dtype = torch.float32 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32)
+        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=training_args.gradient_checkpointing)
+
+    if training_args.gradient_checkpointing:
+        if hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
+        else:
+            def make_inputs_require_grad(module, input, output):
+                output.requires_grad_(True)
+
+            model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
+
+    # LoRA fine-tuning.
+    if training_args.lora_enable:
+        lora_config = LoraConfig(
+            r=training_args.lora_r,
+            lora_alpha=training_args.lora_alpha,
+            target_modules=find_all_linear_names(model),
+            lora_dropout=training_args.lora_dropout,
+            bias=training_args.lora_bias,
+            task_type="CAUSAL_LM",
+        )
+        if training_args.bits == 16:
+            if training_args.bf16:
+                model.to(torch.bfloat16)
+            if training_args.fp16:
+                model.to(torch.float16)
+        rank0_print("Adding LoRA adapters...")
+        model = get_peft_model(model, lora_config)
 
     if model_args.vision_tower is not None:
         if "qwen" in model_args.model_name_or_path.lower():
