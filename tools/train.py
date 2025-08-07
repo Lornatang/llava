@@ -799,7 +799,7 @@ def preprocess(
     # # TODO: implements it.
     # if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.LLAMA:
     #     return preprocess_llama(sources, tokenizer, has_image)
-    if conversation_lib.default_conversation.version == "qwen":
+    if "qwen" in conversation_lib.default_conversation.version:
         return preprocess_qwen(sources, tokenizer, has_image)
 
     # add end signal and concatenate together.
