@@ -38,8 +38,8 @@ from llava.utils import convert_expand_to_square
 from llava.utils.checkpoint import safe_save_model_for_hf_trainer
 from llava.utils.events import LOGGER
 from llava.utils.ops import (
-    find_all_linear_names, get_tokenize_len, get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3, process_anyres_image,
-    process_highres_image, process_highres_image_crop_split, rank0_print, tokenizer_image_token,
+    find_all_linear_names, get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3, process_anyres_image, process_highres_image,
+    process_highres_image_crop_split, rank0_print, tokenizer_image_token,
 )
 
 torch.multiprocessing.set_sharing_strategy("file_system")
@@ -645,6 +645,18 @@ def preprocess(
     Returns:
         Any: A list of processed conversations with images replaced by image tokens.
     """
+
+    def get_tokenize_len(prompts: List[str]) -> List[int]:
+        """Tokenizes a list of prompts and returns their lengths.
+
+        Args:
+            prompts (List[str]): List of prompt strings to tokenize.
+
+        Returns:
+            List[int]: A list of lengths of the tokenized prompts.
+        """
+        return [len(tokenizer_image_token(prompt, tokenizer)) for prompt in prompts]
+
     if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.PLAIN:
         return preprocess_plain(sources, tokenizer)
     if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.VICUNA_V1:
@@ -654,7 +666,7 @@ def preprocess(
     if conversation_lib.default_conversation.version == "qwen":
         return preprocess_qwen(sources, tokenizer, has_image)
 
-    # add end signal and concatenate together
+    # add end signal and concatenate together.
     conversations = []
     header = None
     for source in sources:
