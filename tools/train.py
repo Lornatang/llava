@@ -1152,6 +1152,7 @@ def train(attn_implementation: str = None) -> None:
                 try:
                     patch_size = data_args.image_processor.size[0]
                 except Exception as e:
+                    LOGGER.exception(e)
                     patch_size = data_args.image_processor.size["shortest_edge"]
 
                 assert patch_size in [224, 336, 384, 448, 512], "patch_size should be in [224, 336, 384, 448, 512]"
