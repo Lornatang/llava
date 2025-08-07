@@ -659,10 +659,12 @@ def preprocess(
 
     if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.PLAIN:
         return preprocess_plain(sources, tokenizer)
-    if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.VICUNA_V1:
-        return preprocess_vicuna_v1(sources, tokenizer, has_image)
-    if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.LLAMA:
-        return preprocess_llama(sources, tokenizer, has_image)
+    # # TODO: implements it.
+    # if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.VICUNA_V1:
+    #     return preprocess_vicuna_v1(sources, tokenizer, has_image)
+    # # TODO: implements it.
+    # if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.LLAMA:
+    #     return preprocess_llama(sources, tokenizer, has_image)
     if conversation_lib.default_conversation.version == "qwen":
         return preprocess_qwen(sources, tokenizer, has_image)
 
@@ -766,28 +768,30 @@ def preprocess_plain(
 
 
 def preprocess_vicuna_v1(
-        sources: Dict[str, List[Dict[str, str]]],
+        sources: Sequence[List[str]],
         tokenizer: transformers.PreTrainedTokenizer,
         has_image: bool = False,
-) -> Dict[str, List[Dict[str, str]]]:
-    """Preprocess conversations in Vicuna v1 style.
+) -> Any:
+    """Preprocess conversations for Vicuna-V1.
 
     Args:
-        sources (Dict[str, List[Dict[str, str]]]): A list of conversations, each conversation is a list of sentences.
+        sources (Sequence[List[str]]): A list of conversations, each conversation is a list of sentences.
         tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use for tokenization.
         has_image (bool): Whether the conversations contain images.
 
     Returns:
-        Dict[str, List[Dict[str, str]]]: A dictionary containing the tokenized input IDs and labels.
+        Any: A list of processed conversations with images replaced by image tokens.
     """
     conv = conversation_lib.default_conversation.copy()
+
+    # Unified name.
     roles = {"human": conv.roles[0], "gpt": conv.roles[1]}
 
-    # Apply prompt templates.
     conversations = []
+    # Iterate through each conversation.
     for i, source in enumerate(sources):
+        # Filter the first system message.
         if roles[source[0]["from"]] != conv.roles[0]:
-            # Skip the first one if it is not from human.
             source = source[1:]
 
         conv.messages = []
@@ -809,23 +813,23 @@ def preprocess_vicuna_v1(
             truncation=True,
         ).input_ids
 
-    targets = input_ids.clone()
+    labels = input_ids.clone()
 
     assert conv.sep_style == conversation_lib.SeparatorStyle.VICUNA_V1
 
     # Mask targets: mask everything except assistant responses.
     sep = conv.sep + conv.roles[1] + ": "
-    for conversation, target in zip(conversations, targets):
-        total_len = int(target.ne(tokenizer.pad_token_id).sum())
+    for conversation, label in zip(conversations, labels):
+        total_len = int(label.ne(tokenizer.pad_token_id).sum())
 
         rounds = conversation.split(conv.sep2)
         cur_len = 1
-        target[:cur_len] = IGNORE_INDEX
+        label[:cur_len] = IGNORE_INDEX  # BOS_TOKEN.
         for i, rou in enumerate(rounds):
             if rou == "":
                 break
 
-            parts = rou.split(sep)
+            parts = rou.split(sep)  # User, Assistant.
             if len(parts) != 2:
                 break
             parts[0] += sep
@@ -841,19 +845,19 @@ def preprocess_vicuna_v1(
                 round_len -= 1
                 instruction_len -= 1
 
-            target[cur_len: cur_len + instruction_len] = IGNORE_INDEX
-
+            label[cur_len: cur_len + instruction_len] = IGNORE_INDEX  # User instruction masked.
             cur_len += round_len
-        target[cur_len:] = IGNORE_INDEX
+
+        label[cur_len:] = IGNORE_INDEX
 
         if cur_len < tokenizer.model_max_length:
-            if cur_len != total_len:
-                target[:] = IGNORE_INDEX
-                print(f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}. (ignored)")
+            if cur_len != total_len:  # Maybe mask lengths are not equal.
+                label[:] = IGNORE_INDEX
+                LOGGER.warning(f"Tokenization mismatch: {cur_len} vs. {total_len}. (ignored)")
 
     return dict(
         input_ids=input_ids,
-        labels=targets,
+        labels=labels,
     )
 
 
