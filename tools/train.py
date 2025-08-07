@@ -29,6 +29,8 @@ import yaml
 from PIL import Image, ImageFile
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from peft.tuners.lora import LoraLayer
+from transformers import AutoConfig
+from transformers.models.qwen2_moe.modeling_qwen2_moe import Qwen2MoeSparseMoeBlock
 
 from llava import conversation as conversation_lib
 from llava.constants import IMAGE_TOKEN_INDEX, IGNORE_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
@@ -628,6 +630,138 @@ def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, dat
         eval_dataset=None,
         data_collator=data_collator,
     )
+
+
+def get_model(
+        model_args: Any,
+        training_args: Any,
+        bnb_model_from_pretrained_args: Dict[str, Any]
+) -> transformers.PreTrainedModel:
+    """Load and configure the language (and optionally vision) model for training.
+
+    This function encapsulates all the logic needed to:
+      1. Assert that a valid attention implementation has been specified.
+      2. Load the pretrained model checkpoint from `model_args`.
+      3. Apply any Bits-and-Bytes quantization settings if `bnb_model_from_pretrained_args` is non-empty.
+      4. Move the model to the correct device and dtype based on `training_args`.
+
+    Args:
+        model_args (Any): Namespace or dataclass with model-specific arguments,
+            such as `model_name_or_path` and any vision-tower flags.
+        training_args (Any): HuggingFace `TrainingArguments` (or subclass) containing
+            distributed training settings, precision flags, and `attn_implementation`.
+        bnb_model_from_pretrained_args (Dict[str, Any]): Keyword args passed to
+            `from_pretrained()` when loading the model, controlling 4/8-bit loading
+            via `transformers.BitsAndBytesConfig`.
+
+    Returns:
+        transformers.PreTrainedModel: The fully initialized and configured model ready
+        for further adapter/PEFT wrapping and eventual training.
+
+    Raises:
+        AssertionError: If `training_args.attn_implementation` is not set, since an explicit attention kernel must be chosen for stable performance.
+    """
+    # Ensure the user has specified which attention backend to use.
+    assert training_args.attn_implementation, "You must specify `--attn_implementation`, e.g., 'flash_attention_2' or 'sdpa'."
+
+    customized_kwargs = dict()
+    customized_kwargs.update(bnb_model_from_pretrained_args)
+    cfg_pretrained = None
+
+    overwrite_config = {}
+    if any(
+            [
+                model_args.rope_scaling_factor is not None,
+                model_args.rope_scaling_type is not None,
+                model_args.mm_spatial_pool_stride is not None,
+                model_args.mm_spatial_pool_out_channels is not None,
+                model_args.mm_spatial_pool_mode is not None,
+                model_args.mm_resampler_type is not None,
+            ]
+    ):
+        cfg_pretrained = AutoConfig.from_pretrained(model_args.model_name_or_path)
+
+    if model_args.use_pos_skipping is not None and model_args.pos_skipping_range is not None:
+        overwrite_config["use_pos_skipping"] = model_args.use_pos_skipping
+        overwrite_config["pos_skipping_range"] = model_args.pos_skipping_range
+
+    if model_args.rope_scaling_factor is not None and model_args.rope_scaling_type is not None:
+        overwrite_config["rope_scaling"] = {
+            "factor": model_args.rope_scaling_factor,
+            "type": model_args.rope_scaling_type,
+        }
+        if training_args.model_max_length is None:
+            training_args.model_max_length = cfg_pretrained.max_position_embeddings * model_args.rope_scaling_factor
+            overwrite_config["max_sequence_length"] = training_args.model_max_length
+        assert training_args.model_max_length == int(cfg_pretrained.max_position_embeddings * model_args.rope_scaling_factor), print(
+            f"model_max_length: {training_args.model_max_length}, "
+            f"max_position_embeddings: {cfg_pretrained.max_position_embeddings}, "
+            f"rope_scaling_factor: {model_args.rope_scaling_factor}."
+        )
+
+    if model_args.mm_spatial_pool_stride is not None and model_args.mm_spatial_pool_out_channels is not None and model_args.mm_spatial_pool_mode is not None and model_args.mm_resampler_type is not None:
+        overwrite_config["mm_resampler_type"] = model_args.mm_resampler_type
+        overwrite_config["mm_spatial_pool_stride"] = model_args.mm_spatial_pool_stride
+        overwrite_config["mm_spatial_pool_out_channels"] = model_args.mm_spatial_pool_out_channels
+        overwrite_config["mm_spatial_pool_mode"] = model_args.mm_spatial_pool_mode
+
+    if model_args.mm_spatial_pool_mode is not None:
+        overwrite_config["mm_spatial_pool_mode"] = model_args.mm_spatial_pool_mode
+
+    if overwrite_config:
+        assert cfg_pretrained is not None, "cfg_pretrained is None"
+
+        LOGGER.info(f"Overwriting config with {overwrite_config}")
+        for k, v in overwrite_config.items():
+            setattr(cfg_pretrained, k, v)
+
+        customized_kwargs["config"] = cfg_pretrained
+
+    if model_args.vision_tower is not None:
+        if "qwen" in model_args.model_name_or_path.lower():
+            if "moe" in model_args.model_name_or_path.lower() or "A14B" in model_args.model_name_or_path:
+                model = LlavaQwenMoeForCausalLM.from_pretrained(
+                    model_args.model_name_or_path,
+                    cache_dir=training_args.cache_dir,
+                    attn_implementation=training_args.attn_implementation,
+                    torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                    low_cpu_mem_usage=False,
+                    **customized_kwargs,
+                )
+                deepspeed.utils.set_z3_leaf_modules(model, [Qwen2MoeSparseMoeBlock])
+            else:
+                model = LlavaQwen2ForCausalLM.from_pretrained(
+                    model_args.model_name_or_path,
+                    cache_dir=training_args.cache_dir,
+                    attn_implementation=training_args.attn_implementation,
+                    torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                    low_cpu_mem_usage=False,
+                    **customized_kwargs,
+                )
+        elif (
+                "vicuna" in model_args.model_name_or_path.lower() or
+                "llama" in model_args.model_name_or_path.lower()
+        ):
+            model = LlavaLlamaForCausalLM.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                attn_implementation=training_args.attn_implementation,
+                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                low_cpu_mem_usage=False,
+                **customized_kwargs,
+            )
+        else:
+            raise ValueError(f"Unknown model class {model_args}")
+    else:
+        model = LlamaForCausalLM.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            attn_implementation=training_args.attn_implementation,
+            torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+            low_cpu_mem_usage=False,
+            **customized_kwargs,
+        )
+    return model
 
 
 def preprocess(
