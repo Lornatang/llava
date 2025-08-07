@@ -38,8 +38,8 @@ from llava.utils import convert_expand_to_square
 from llava.utils.checkpoint import safe_save_model_for_hf_trainer
 from llava.utils.events import LOGGER
 from llava.utils.ops import (
-    find_all_linear_names, get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3, process_anyres_image, process_highres_image,
-    process_highres_image_crop_split, rank0_print, tokenizer_image_token,
+    find_all_linear_names, get_tokenize_len, get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3, process_anyres_image,
+    process_highres_image, process_highres_image_crop_split, rank0_print, tokenizer_image_token,
 )
 
 torch.multiprocessing.set_sharing_strategy("file_system")
@@ -631,26 +631,26 @@ def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, dat
 
 
 def preprocess(
-        sources: Dict[str, List[Dict[str, str]]],
+        sources: Sequence[List[str]],
         tokenizer: transformers.PreTrainedTokenizer,
         has_image: bool = False,
-) -> Dict[str, torch.Tensor]:
-    """Preprocess conversations for supervised fine-tuning.
+) -> Any:
+    """Preprocess conversations for supervised.
 
     Args:
-        sources (Dict[str, List[Dict[str, str]]]): A list of conversations, each conversation is a list of sentences.
+        sources (Sequence[List[str]]): A list of conversations, each conversation is a list of sentences.
         tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use for tokenization.
         has_image (bool): Whether the conversations contain images.
 
     Returns:
-        Dict[str, torch.Tensor]: A dictionary containing the tokenized input IDs and labels.
+        Any: A list of processed conversations with images replaced by image tokens.
     """
     if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.PLAIN:
         return preprocess_plain(sources, tokenizer)
     if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.VICUNA_V1:
         return preprocess_vicuna_v1(sources, tokenizer, has_image)
     if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.LLAMA:
-        return preprocess_llama2(sources, tokenizer, has_image)
+        return preprocess_llama(sources, tokenizer, has_image)
     if conversation_lib.default_conversation.version == "qwen":
         return preprocess_qwen(sources, tokenizer, has_image)
 
@@ -662,43 +662,39 @@ def preprocess(
         conversation = _add_speaker_and_signal(header, source)
         conversations.append(conversation)
 
-    # tokenize conversations
-    def get_tokenize_len(prompts):
-        return [len(tokenizer_image_token(prompt, tokenizer)) for prompt in prompts]
-
     if has_image:
         input_ids = [tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations]
     else:
         conversations_tokenized = _tokenize_fn(conversations, tokenizer)
         input_ids = conversations_tokenized["input_ids"]
 
-    targets = deepcopy(input_ids)
-    for target, source in zip(targets, sources):
+    labels = deepcopy(input_ids)
+    for label, source in zip(labels, sources):
         if has_image:
             tokenized_lens = get_tokenize_len([header] + [s["value"] for s in source])
         else:
             tokenized_lens = _tokenize_fn([header] + [s["value"] for s in source], tokenizer)["input_ids_lens"]
         speakers = [sentence["from"] for sentence in source]
-        _mask_targets(target, tokenized_lens, speakers)
+        _mask_targets(label, tokenized_lens, speakers)
 
     return dict(
         input_ids=input_ids,
-        labels=targets,
+        labels=labels,
     )
 
 
 def preprocess_multimodal(
-        sources: Union[Dict[str, List[Dict[str, str]]], List[str]],
+        sources: Union[Sequence[List[str]], List[str]],
         data_args: DataArguments,
-) -> Dict[str, List[Dict[str, str]]]:
+) -> Sequence[List[str]]:
     """Preprocess conversations for multimodal fine-tuning.
 
     Args:
-        sources (Union[Dict[str, List[Dict[str, str]]], List[str]]): A list of conversations, each conversation is a list of sentences.
+        sources (Union[Sequence[List[str]], List[str]]): A list of conversations, each conversation is a list of sentences.
         data_args (DataArguments): The data arguments containing multimodal configurations.
 
     Returns:
-        Dict[str, List[Dict[str, str]]]: The preprocessed conversations with image tokens replaced.
+        Any: A list of processed conversations with images replaced by image tokens.
     """
     is_multimodal = data_args.is_multimodal
     if not is_multimodal:
@@ -847,7 +843,7 @@ def preprocess_vicuna_v1(
     )
 
 
-def preprocess_llama2(
+def preprocess_llama(
         sources: Dict[str, List[Dict[str, str]]],
         tokenizer: transformers.PreTrainedTokenizer,
         has_image: bool = False,
@@ -936,22 +932,23 @@ def preprocess_llama2(
 
 
 def preprocess_qwen(
-        sources: Dict[str, List[Dict[str, str]]],
+        sources: Sequence[List[str]],
         tokenizer: transformers.PreTrainedTokenizer,
         has_image: bool = False,
         system_message: str = "You are a helpful assistant."
-) -> Dict[str, List[Dict[str, str]]]:
-    """Preprocess conversations in Qwen style.
+) -> Any:
+    """Preprocess conversations for Qwen1.5/2.
 
     Args:
-        sources (Dict[str, List[Dict[str, str]]]): A list of conversations, each conversation is a list of sentences.
+        sources (Sequence[List[str]]): A list of conversations, each conversation is a list of sentences.
         tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use for tokenization.
         has_image (bool): Whether the conversations contain images.
         system_message (str, optional): The system message to prepend to each conversation. Defaults to ``You are a helpful assistant.``.
 
     Returns:
-        Dict[str, List[Dict[str, str]]]: A dictionary containing the tokenized input IDs and labels.
+        Any: A list of processed conversations with images replaced by image tokens.
     """
+    # Unified name.
     roles = {"human": "user", "gpt": "assistant"}
 
     tokenizer = copy.deepcopy(tokenizer)
@@ -963,25 +960,24 @@ def preprocess_qwen(
     im_start, im_end = tokenizer.additional_special_tokens_ids
     unmask_tokens_index = [198, im_start, im_end]
 
-    # Reset Qwen chat templates so that it won't include system message every time we apply
+    # Reset Qwen chat templates so that it won't include system message every time we apply.
     chat_template = "{% for message in messages %}{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}"
     tokenizer.chat_template = chat_template
 
-    # Apply prompt templates
-    input_ids, targets = [], []
+    # input_ids: system+user+assistant.
+    # labels: The corresponding label sequence (used in loss calculation).
+    input_ids, labels = [], []
+    # Iterate through each conversation.
     for i, source in enumerate(sources):
+        # Filter the first system message.
         if roles[source[0]["from"]] != roles["human"]:
             source = source[1:]
 
-        input_id, target = [], []
-
-        # New version, use apply chat template
-        # Build system message for each sentence
+        input_id, label = [], []
         input_id += tokenizer.apply_chat_template([{"role": "system", "content": system_message}])
-        target += [IGNORE_INDEX] * len(input_id)
+        label += [IGNORE_INDEX] * len(input_id)  # Not involved in label learning.
 
         for conv in source:
-            # Make sure llava data can load
             try:
                 role = conv["role"]
                 content = conv["content"]
@@ -990,29 +986,29 @@ def preprocess_qwen(
                 content = conv["value"]
 
             role = roles.get(role, role)
-
-            conv = [{"role": role, "content": content}]
+            conv = [{"role": role, "content": content}]  # Map "human"/"gpt" to "user"/"assistant".
             encode_id = tokenizer.apply_chat_template(conv)
             input_id += encode_id
             if role in ["user", "system"]:
-                target += [IGNORE_INDEX] * len(encode_id)
-            else:
-                target += encode_id
+                label += [IGNORE_INDEX] * len(encode_id)
+            else:  # role == "assistant".
+                label += encode_id
 
-        assert len(input_id) == len(target), f"{len(input_id)} != {len(target)}"
-        for idx, encode_id in enumerate(input_id):
-            if encode_id in unmask_tokens_index:
-                target[idx] = encode_id
-            if encode_id == image_token_index:
-                input_id[idx] = IMAGE_TOKEN_INDEX
+        assert len(input_id) == len(label), f"{len(input_id)} != {len(label)}"
+        for j, encode_id in enumerate(input_id):
+            if encode_id in unmask_tokens_index:  # Structured control symbols. Example: <image>, <im_start>, <im_end>.
+                label[j] = encode_id
+            if encode_id == image_token_index:  # Vision token.
+                input_id[j] = IMAGE_TOKEN_INDEX
         input_ids.append(input_id)
-        targets.append(target)
+        labels.append(label)
+
     input_ids = torch.tensor(input_ids, dtype=torch.long)
-    targets = torch.tensor(targets, dtype=torch.long)
+    labels = torch.tensor(labels, dtype=torch.long)
 
     return dict(
         input_ids=input_ids,
-        labels=targets,
+        labels=labels,
     )
 
 

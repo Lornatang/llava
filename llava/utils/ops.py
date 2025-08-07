@@ -30,9 +30,10 @@ from .events import LOGGER
 
 __all__ = [
     "convert_expand_to_square", "divide_to_patches", "extract_patches", "find_all_linear_names", "get_anyres_image_grid_shape",
-    "get_model_name_from_path", "get_peft_state_maybe_zero_3", "get_peft_state_non_lora_maybe_zero_3", "get_mm_adapter_state_maybe_zero_3",
-    "load_image", "load_image_from_base64", "maybe_zero_3", "process_anyres_image", "process_highres_image", "process_highres_image_crop_split",
-    "process_images", "rank0_print", "resize_and_pad_image", "select_best_resolution", "split_to_even_chunks", "tokenizer_image_token", "unpad_image",
+    "get_model_name_from_path", "get_tokenize_len", "get_peft_state_maybe_zero_3", "get_peft_state_non_lora_maybe_zero_3",
+    "get_mm_adapter_state_maybe_zero_3", "load_image", "load_image_from_base64", "maybe_zero_3", "process_anyres_image", "process_highres_image",
+    "process_highres_image_crop_split", "process_images", "rank0_print", "resize_and_pad_image", "select_best_resolution", "split_to_even_chunks",
+    "tokenizer_image_token", "unpad_image",
 ]
 
 
@@ -184,6 +185,19 @@ def get_model_name_from_path(model_path: str) -> str:
         return model_paths[-2] + "_" + model_paths[-1]
     else:
         return model_paths[-1]
+
+
+def get_tokenize_len(prompts: List[str], tokenizer: Any) -> List[int]:
+    """Tokenizes a list of prompts and returns their lengths.
+
+    Args:
+        prompts (List[str]): List of prompt strings to tokenize.
+        tokenizer (Any): The tokenizer object to use for tokenization.
+
+    Returns:
+        List[int]: A list of lengths of the tokenized prompts.
+    """
+    return [len(tokenizer_image_token(prompt, tokenizer)) for prompt in prompts]
 
 
 def get_peft_state_maybe_zero_3(named_params: Iterable, bias: str) -> Dict[str, torch.Tensor]:
