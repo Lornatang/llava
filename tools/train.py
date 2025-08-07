@@ -731,18 +731,19 @@ def preprocess_multimodal(
 
 
 def preprocess_plain(
-        sources: Dict[str, List[Dict[str, str]]],
+        sources: Sequence[List[str]],
         tokenizer: transformers.PreTrainedTokenizer,
-) -> Dict[str, List[Union[List[int], torch.Tensor]]]:
-    """Preprocess conversations in plain style.
+) -> Any:
+    """Preprocess conversations for text.
 
     Args:
-        sources (Dict[str, List[Dict[str, str]]]): A list of conversations, each conversation is a list of sentences.
+        sources (Sequence[List[str]]): A list of conversations, each conversation is a list of sentences.
         tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use for tokenization.
 
     Returns:
-        Dict[str, List[Union[List[int], torch.Tensor]]]: A dictionary containing the tokenized input IDs and labels.
+        Any: A list of processed conversations with images replaced by image tokens.
     """
+    # add end signal and concatenate together.
     conversations = []
     for source in sources:
         assert len(source) == 2
@@ -751,15 +752,16 @@ def preprocess_plain(
         conversation = source[0]["value"] + source[1]["value"] + conversation_lib.default_conversation.sep
         conversations.append(conversation)
 
+    # tokenize conversations.
     input_ids = [tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations]
-    targets = deepcopy(input_ids)
-    for target, source in zip(targets, sources):
+    labels = copy.deepcopy(input_ids)
+    for label, source in zip(labels, sources):
         tokenized_len = len(tokenizer_image_token(source[0]["value"], tokenizer))
-        target[:tokenized_len] = IGNORE_INDEX
+        label[:tokenized_len] = IGNORE_INDEX
 
     return dict(
         input_ids=input_ids,
-        labels=targets,
+        labels=labels,
     )
 
 
