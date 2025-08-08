@@ -460,62 +460,58 @@ class LazySupervisedDataset(torch.utils.data.Dataset):
             else:
                 image = [self.process_image(image_file)]
 
-            sources = preprocess_multimodal(deepcopy([e["conversations"] for e in sources]), self.data_args)
-        # TODO: implements it.
-        # elif "video" in sources[0]:
-        #     video_file = self.list_data_dict[index]["video"]
-        #     video_folder = self.data_args.video_folder
-        #     video_file = os.path.join(video_folder, video_file)
-        #     if not os.path.exists(video_file):
-        #         LOGGER.error(f"File {video_file} not exist!")
-        #
-        #     try:
-        #         if "shareVideoGPTV" in video_file:
-        #             frame_files = [os.path.join(video_file, f) for f in os.listdir(video_file) if os.path.isfile(os.path.join(video_file, f))]
-        #             frame_files.sort()
-        #
-        #             if self.data_args.force_sample:
-        #                 num_frames_to_sample = self.data_args.frames_upbound
-        #             else:
-        #                 num_frames_to_sample = 10
-        #
-        #             avg_fps = 2
-        #             total_frames = len(frame_files)
-        #             sampled_indices = np.linspace(0, total_frames - 1, num_frames_to_sample, dtype=int)
-        #             frame_time = [i / 2 for i in sampled_indices]
-        #             frame_time = ",".join([f"{i:.2f}s" for i in frame_time])
-        #             video_time = total_frames / avg_fps
-        #
-        #             # Read and store the sampled frames.
-        #             video = []
-        #             for index in sampled_indices:
-        #                 frame_path = frame_files[index]
-        #                 try:
-        #                     with Image.open(frame_path) as img:
-        #                         frame = img.convert("RGB")
-        #                         video.append(frame)
-        #                 except IOError as e:
-        #                     LOGGER.exception(f"Failed to read frame at path: {frame_path}. {e}.")
-        #         else:
-        #             video, video_time, frame_time, num_frames_to_sample = process_video_with_decord(video_file, self.data_args)
-        #
-        #         processor = self.data_args.image_processor
-        #         image = processor.preprocess(video, return_tensors="pt")["pixel_values"]
-        #         if self.data_args.add_time_instruction:
-        #             time_instruction = f"The video lasts for {video_time:.2f} seconds, and {num_frames_to_sample} frames are uniformly sampled from it. These frames are located at {frame_time}.Please answer the following questions related to this video."
-        #             sources[0]["conversations"][0][
-        #                 "value"] = f'{DEFAULT_IMAGE_TOKEN}\n{time_instruction}\n{sources[0]["conversations"][0]["value"].replace(DEFAULT_IMAGE_TOKEN, "")}'
-        #         image = [(image, video[0].size, "video")]
-        #         sources = preprocess_multimodal(deepcopy([e["conversations"] for e in sources]), self.data_args)
-        #     except Exception as e:
-        #         LOGGER.exception(f"Failed to read video file: {video_file}. {e}.")
-        #         return self._get_item(index + 1)
-        else:
-            sources = deepcopy([e["conversations"] for e in sources])
+            sources = preprocess_multimodal(deepcopy([source["conversations"] for source in sources]), self.data_args)
+        elif "video" in sources[0]:
+            video_file = self.list_data_dict[index]["video"]
+            video_folder = self.data_args.video_folder
+            video_file = os.path.join(video_folder, video_file)
+            if not os.path.exists(video_file):
+                LOGGER.error(f"File {video_file} not exist!")
 
-        # TODO: implements it.
-        # has_image = ("image" in self.list_data_dict[index]) or ("video" in self.list_data_dict[index])
-        has_image = "image" in self.list_data_dict[index]
+            try:
+                if "shareVideoGPTV" in video_file:
+                    frame_files = sorted([str(file) for file in Path(video_file).iterdir() if file.is_file()])
+
+                    if self.data_args.force_sample:
+                        num_frames_to_sample = self.data_args.frames_upbound
+                    else:
+                        num_frames_to_sample = 10
+
+                    avg_fps = 2
+                    total_frames = len(frame_files)
+                    sampled_indices = np.linspace(0, total_frames - 1, num_frames_to_sample, dtype=int)
+                    frame_time = [i / 2 for i in sampled_indices]
+                    frame_time = ",".join([f"{i:.2f}s" for i in frame_time])
+                    video_time = total_frames / avg_fps
+
+                    # Read and store the sampled frames.
+                    video = []
+                    for index in sampled_indices:
+                        frame_path = frame_files[index]
+                        try:
+                            with Image.open(frame_path) as image:
+                                frame = image.convert("RGB")
+                                video.append(frame)
+                        except IOError as e:
+                            LOGGER.exception(f"Failed to read frame at path: {frame_path}. {e}.")
+                else:
+                    video, video_time, frame_time, num_frames_to_sample = process_video_with_decord(video_file, self.data_args)
+
+                processor = self.data_args.image_processor
+                image = processor.preprocess(video, return_tensors="pt")["pixel_values"]
+                if self.data_args.add_time_instruction:
+                    time_instruction = f"The video lasts for {video_time:.2f} seconds, and {num_frames_to_sample} frames are uniformly sampled from it. These frames are located at {frame_time}.Please answer the following questions related to this video."
+                    sources[0]["conversations"][0][
+                        "value"] = f'{DEFAULT_IMAGE_TOKEN}\n{time_instruction}\n{sources[0]["conversations"][0]["value"].replace(DEFAULT_IMAGE_TOKEN, "")}'
+                image = [(image, video[0].size, "video")]
+                sources = preprocess_multimodal(deepcopy([e["conversations"] for e in sources]), self.data_args)
+            except Exception as e:
+                LOGGER.exception(f"Failed to read video file: {video_file}. {e}.")
+                return self._get_item(index + 1)
+        else:
+            sources = deepcopy([source["conversations"] for source in sources])
+
+        has_image = ("image" in self.list_data_dict[index]) or ("video" in self.list_data_dict[index])
         data_dict = preprocess(sources, self.tokenizer, has_image=has_image)
 
         if "prompt" in data_dict:
@@ -526,17 +522,14 @@ class LazySupervisedDataset(torch.utils.data.Dataset):
         if isinstance(index, int):
             data_dict = dict(input_ids=data_dict["input_ids"][0], labels=data_dict["labels"][0])
 
-        # image exist in the data
+        # image exist in the data.
         if "image" in self.list_data_dict[index]:
             data_dict["image"] = image
-        # TODO: implements it.
-        # elif "video" in self.list_data_dict[index]:
-        #     data_dict["image"] = image
+        elif "video" in self.list_data_dict[index]:
+            data_dict["image"] = image
         elif self.data_args.is_multimodal:
             crop_size = self.data_args.image_processor.crop_size
-            data_dict["image"] = [
-                (torch.zeros(1, 3, crop_size["height"], crop_size["width"]), (crop_size["width"], crop_size["height"]), "text"),
-            ]
+            data_dict["image"] = [(torch.zeros(1, 3, crop_size["height"], crop_size["width"]), (crop_size["width"], crop_size["height"]), "text")]
 
         # prompt exist in the data.
         if prompt is not None:
