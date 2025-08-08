@@ -1373,8 +1373,8 @@ def train(attn_implementation: str = None) -> None:
 
         total_params = sum(p.ds_numel if hasattr(p, "ds_numel") else p.numel() for p in model.parameters())
         trainable_params = sum(p.ds_numel if hasattr(p, "ds_numel") else p.numel() for p in model.parameters() if p.requires_grad)
-        LOGGER.info(f"Total parameters: ~{total_params / 1e6:.2f} MB.")
-        LOGGER.info(f"Trainable parameters: ~{trainable_params / 1e6:.2f} MB.")
+        LOGGER.info(f"Total parameters: {total_params / 1e6:.2f} MB.")
+        LOGGER.info(f"Trainable parameters: {trainable_params / 1e6:.2f} MB.")
         if training_args.bits in [4, 8]:
             model.get_model().mm_projector.to(dtype=compute_dtype, device=training_args.device)
 
