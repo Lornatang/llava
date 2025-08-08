@@ -1283,11 +1283,7 @@ def train(attn_implementation: str = None) -> None:
         model.config.image_aspect_ratio = data_args.image_aspect_ratio
         if data_args.image_grid_pinpoints is not None:
             if isinstance(data_args.image_grid_pinpoints, str) and "x" in data_args.image_grid_pinpoints:
-                try:
-                    patch_size = data_args.image_processor.size[0]
-                except Exception as e:
-                    LOGGER.exception(e)
-                    patch_size = data_args.image_processor.size["shortest_edge"]
+                patch_size = data_args.image_processor.size["shortest_edge"]
 
                 assert patch_size in [224, 336, 384, 448, 512], "patch_size should be in [224, 336, 384, 448, 512]"
                 # Use regex to extract the range from the input string
