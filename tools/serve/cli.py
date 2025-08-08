@@ -96,13 +96,12 @@ def cli(
 
         print(f"Assistant: ", end="")
 
-        if image is not None:
+        if image is not None and len(conv.messages) == 0:
             if model.config.mm_use_im_start_end:
                 inputs = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN + "\n" + inputs
             else:
                 inputs = DEFAULT_IMAGE_TOKEN + "\n" + inputs
             conv.append_message(conv.roles[0], inputs)
-            image = None
         else:
             conv.append_message(conv.roles[0], inputs)
         conv.append_message(conv.roles[1], None)
@@ -127,7 +126,7 @@ def cli(
                 stopping_criteria=[stopping_criteria],
             )
 
-        outputs = tokenizer.decode(output_ids[0, input_ids.shape[1]:]).strip()
+        outputs = tokenizer.decode(output_ids[0]).strip()
         conv.messages[-1][-1] = outputs
 
 
