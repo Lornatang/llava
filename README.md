@@ -45,7 +45,7 @@ This is the official mixed dataset annotation, please download it for fine-tunin
 - [coco train2017](http://images.cocodataset.org/zips/train2017.zip)
 - [gqa images](https://downloads.cs.stanford.edu/nlp/data/gqa/images.zip)
 - [ocr_vqa images](https://drive.google.com/drive/folders/1_GYPY5UkUy7HIcR0zq3ZCFgeZN7BAfm_?usp=sharing)
-- [textvqa train_val_images](https://drive.google.com/drive/folders/1_GYPY5UkUy7HIcR0zq3ZCFgeZN7BAfm_?usp=sharing)
+- [textvqa train_val_images](https://dl.fbaipublicfiles.com/textvqa/images/train_val_images.zip)
 - [vg part1](https://cs.stanford.edu/people/rak248/VG_100K_2/images.zip) 
 - [vg part2](https://cs.stanford.edu/people/rak248/VG_100K_2/images2.zip)
 
