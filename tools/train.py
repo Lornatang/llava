@@ -11,8 +11,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
+import ast
 import copy
 import json
+import math
 import random
 import re
 import time
@@ -21,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
-import math
+import numpy as np
 import torch
 import torch.utils.data
 import transformers
@@ -30,7 +32,6 @@ from PIL import Image, ImageFile
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from peft.tuners.lora import LoraLayer
 from transformers import AutoConfig
-from transformers.models.qwen2_moe.modeling_qwen2_moe import Qwen2MoeSparseMoeBlock
 
 from llava import conversation as conversation_lib
 from llava.constants import IMAGE_TOKEN_INDEX, IGNORE_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
@@ -41,7 +42,7 @@ from llava.utils.checkpoint import safe_save_model_for_hf_trainer
 from llava.utils.events import LOGGER
 from llava.utils.ops import (
     find_all_linear_names, get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3, process_anyres_image, process_highres_image,
-    process_highres_image_crop_split, rank0_print, tokenizer_image_token,
+    process_highres_image_crop_split, process_video_with_decord, rank0_print, tokenizer_image_token,
 )
 
 torch.multiprocessing.set_sharing_strategy("file_system")
@@ -464,13 +465,13 @@ class LazySupervisedDataset(torch.utils.data.Dataset):
         elif "video" in sources[0]:
             video_file = self.list_data_dict[index]["video"]
             video_folder = self.data_args.video_folder
-            video_file = os.path.join(video_folder, video_file)
-            if not os.path.exists(video_file):
+            video_file = Path(video_folder, video_file)
+            if not video_file.exists():
                 LOGGER.error(f"File {video_file} not exist!")
 
             try:
-                if "shareVideoGPTV" in video_file:
-                    frame_files = sorted([str(file) for file in Path(video_file).iterdir() if file.is_file()])
+                if "shareVideoGPTV" in str(video_file):
+                    frame_files = sorted([str(file) for file in video_file.iterdir() if file.is_file()])
 
                     if self.data_args.force_sample:
                         num_frames_to_sample = self.data_args.frames_upbound
@@ -711,32 +712,20 @@ def get_model(
 
         customized_kwargs["config"] = cfg_pretrained
 
-    if model_args.vision_tower is not None:
-        if "qwen" in model_args.model_name_or_path.lower():
-            if "moe" in model_args.model_name_or_path.lower() or "A14B" in model_args.model_name_or_path:
-                model = LlavaQwenMoeForCausalLM.from_pretrained(
-                    model_args.model_name_or_path,
-                    cache_dir=training_args.cache_dir,
-                    attn_implementation=training_args.attn_implementation,
-                    torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                    low_cpu_mem_usage=False,
-                    **customized_kwargs,
-                )
-                deepspeed.utils.set_z3_leaf_modules(model, [Qwen2MoeSparseMoeBlock])
-            else:
-                model = LlavaQwen2ForCausalLM.from_pretrained(
-                    model_args.model_name_or_path,
-                    cache_dir=training_args.cache_dir,
-                    attn_implementation=training_args.attn_implementation,
-                    torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                    low_cpu_mem_usage=False,
-                    **customized_kwargs,
-                )
-        elif (
-                "vicuna" in model_args.model_name_or_path.lower() or
-                "llama" in model_args.model_name_or_path.lower()
-        ):
-            model = LlavaLlamaForCausalLM.from_pretrained(
+    if "qwen" in model_args.model_name_or_path.lower():
+        if "moe" in model_args.model_name_or_path.lower() or "A14B" in model_args.model_name_or_path:  # TODO: implement Qwen2 MoE model.
+            raise "Qwen2 MoE model is not supported yet."
+            # model = LlavaQwenMoeForCausalLM.from_pretrained(
+            #     model_args.model_name_or_path,
+            #     cache_dir=training_args.cache_dir,
+            #     attn_implementation=training_args.attn_implementation,
+            #     torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+            #     low_cpu_mem_usage=False,
+            #     **customized_kwargs,
+            # )
+            # deepspeed.utils.set_z3_leaf_modules(model, [Qwen2MoeSparseMoeBlock])
+        else:
+            model = LlavaQwen2ForCausalLM.from_pretrained(
                 model_args.model_name_or_path,
                 cache_dir=training_args.cache_dir,
                 attn_implementation=training_args.attn_implementation,
@@ -744,10 +733,11 @@ def get_model(
                 low_cpu_mem_usage=False,
                 **customized_kwargs,
             )
-        else:
-            raise ValueError(f"Unknown model class {model_args}")
-    else:
-        model = LlamaForCausalLM.from_pretrained(
+    elif (
+            "vicuna" in model_args.model_name_or_path.lower() or
+            "llama" in model_args.model_name_or_path.lower()
+    ):
+        model = LlavaLlamaForCausalLM.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
             attn_implementation=training_args.attn_implementation,
@@ -755,6 +745,8 @@ def get_model(
             low_cpu_mem_usage=False,
             **customized_kwargs,
         )
+    else:
+        raise ValueError(f"Unknown model class {model_args}")
     return model
 
 
@@ -787,9 +779,8 @@ def preprocess(
 
     if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.PLAIN:
         return preprocess_plain(sources, tokenizer)
-    # # TODO: implements it.
-    # if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.VICUNA_V1:
-    #     return preprocess_vicuna_v1(sources, tokenizer, has_image)
+    if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.VICUNA_V1:
+        return preprocess_vicuna_v1(sources, tokenizer, has_image)
     # # TODO: implements it.
     # if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.LLAMA:
     #     return preprocess_llama(sources, tokenizer, has_image)
@@ -1420,7 +1411,7 @@ def train(attn_implementation: str = None) -> None:
             if hasattr(model, "generation_config"):
                 model.generation_config.save_pretrained(training_args.output_dir)
             model.save_pretrained(training_args.output_dir, state_dict=state_dict)
-            torch.save(non_lora_state_dict, os.path.join(training_args.output_dir, "non_lora_trainables.bin"))
+            torch.save(non_lora_state_dict, Path(training_args.output_dir, "non_lora_trainables.bin"))
     else:
         safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
 

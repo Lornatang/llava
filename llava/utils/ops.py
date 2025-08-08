@@ -15,25 +15,28 @@ import ast
 import base64
 import math
 from io import BytesIO
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
+import numpy as np
 import requests
 import torch
 import torch.distributed as dist
 import transformers
 from PIL import Image
+from decord import VideoReader, cpu
 from deepspeed import zero
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
-from llava.constants import IMAGE_TOKEN_INDEX
 
+from llava.constants import IMAGE_TOKEN_INDEX
 from .events import LOGGER
 
 __all__ = [
     "KeywordsStoppingCriteria", "convert_expand_to_square", "divide_to_patches", "extract_patches", "find_all_linear_names",
     "get_anyres_image_grid_shape", "get_model_name_from_path", "get_peft_state_maybe_zero_3", "get_peft_state_non_lora_maybe_zero_3",
     "get_mm_adapter_state_maybe_zero_3", "load_image", "load_image_from_base64", "maybe_zero_3", "process_anyres_image", "process_highres_image",
-    "process_highres_image_crop_split", "process_images", "rank0_print", "resize_and_pad_image", "select_best_resolution", "split_to_even_chunks",
-    "tokenizer_image_token", "unpad_image",
+    "process_highres_image_crop_split", "process_video_with_decord", "process_images", "rank0_print", "resize_and_pad_image",
+    "select_best_resolution", "split_to_even_chunks", "tokenizer_image_token", "unpad_image",
 ]
 
 
@@ -448,6 +451,59 @@ def process_highres_image_crop_split(
     image_patches = extract_patches(image_crop, patch_size=data_args.image_split_resolution, overlap_ratio=0)
     image_patches = [processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in image_patches]
     return torch.stack(image_patches, dim=0)
+
+
+def process_video_with_decord(
+        video_file: Union[str, Path],
+        data_args: Any
+) -> Tuple[np.ndarray, float, str, int]:
+    """Sample frames from a video file using Decord and return sampling results.
+
+    This helper opens `video_file` with Decord's `VideoReader`, computes a
+    down-sampled frame index list according to `data_args.video_fps`, optionally
+    enforces an upper bound on total sampled frames (`data_args.frames_upbound`)
+    and `data_args.force_sample`, then reads those frames as a NumPy array.
+
+    The function returns:
+      - `video`: a NumPy array containing the sampled frames (shape: N x H x W x C).
+      - `video_time`: total video duration in seconds (float).
+      - `frame_time`: a comma-separated string describing timestamps for each sampled frame,
+        formatted as `"{seconds:.2f}s"`.
+      - `num_frames_to_sample`: number of frames actually sampled (int).
+
+    Args:
+        video_file (Union[str, Path]): Path to the video file.
+        data_args (Any): An object containing configuration attributes:
+            - video_fps (int): Target frame rate for sampling.
+            - frames_upbound (int): Maximum number of frames to sample.
+            - force_sample (bool): Whether to force sampling even if the number of frames exceeds `frames_upbound`.
+
+    Returns:
+        Tuple[np.ndarray, float, str, int]: (video, video_time_seconds, frame_time_str, num_frames)
+
+    Raises:
+        ValueError: if the video contains zero frames or Decord cannot open the file.
+        AttributeError: if required attributes are missing on `data_args`.
+    """
+    video_reader = VideoReader(video_file, ctx=cpu(0), num_threads=1)
+    total_frame_num = len(video_reader)
+    video_time = total_frame_num / video_reader.get_avg_fps()
+    avg_fps = round(video_reader.get_avg_fps() / data_args.video_fps)
+    frame_idx = [i for i in range(0, total_frame_num, avg_fps)]
+    frame_time = [i / avg_fps for i in frame_idx]
+
+    if data_args.frames_upbound > 0:
+        if len(frame_idx) > data_args.frames_upbound or data_args.force_sample:
+            uniform_sampled_frames = np.linspace(0, total_frame_num - 1, data_args.frames_upbound, dtype=int)
+            frame_idx = uniform_sampled_frames.tolist()
+            frame_time = [i / video_reader.get_avg_fps() for i in frame_idx]
+
+    video = video_reader.get_batch(frame_idx).asnumpy()
+    frame_time = ",".join([f"{i:.2f}s" for i in frame_time])
+
+    num_frames_to_sample = num_frames = len(frame_idx)
+    video_reader.seek(0)
+    return video, video_time, frame_time, num_frames_to_sample
 
 
 def process_images(
