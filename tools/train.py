@@ -596,6 +596,7 @@ class LazySupervisedDataset(torch.utils.data.Dataset):
             LOGGER.exception(f"Failed to open image {image_file}. {e}.")
             raise e
 
+        image_size = image.size
         if overwrite_image_aspect_ratio is not None:
             self.data_args.image_aspect_ratio = overwrite_image_aspect_ratio
 
@@ -610,7 +611,7 @@ class LazySupervisedDataset(torch.utils.data.Dataset):
             image = self.data_args.image_processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
         else:
             image = self.data_args.image_processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
-        return image, image.size, "image"
+        return image, image_size, "image"
 
 
 def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, data_args: DataArguments) -> Dict[str, torch.utils.data.Dataset]:

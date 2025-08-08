@@ -306,8 +306,8 @@ class LlavaMetaForCausalLM(ABC):
             past_key_values: Any,
             labels: Optional[torch.Tensor],
             images: Optional[Union[torch.Tensor, List[torch.Tensor]]],
-            image_sizes: Optional[List[Tuple[int, int]]] = None,
-            modalities: List[str] = None,
+            image_sizes: Optional[Tuple[int, int]] = None,
+            modalities: Optional[List[str]] = None,
     ) -> Any:
         """Prepare inputs and labels for multimodal (image+text) training.
 
@@ -317,9 +317,9 @@ class LlavaMetaForCausalLM(ABC):
             attention_mask (Optional[torch.Tensor]): Attention mask.
             past_key_values (Any): Past key values for transformer.
             labels (Optional[torch.Tensor]): Labels for training.
-            images (Optional[Union[torch.Tensor, List[torch.Tensor]]]): Image tensor(s).
-            image_sizes (Optional[List[Tuple[int, int]]], optional): Sizes of images, if available. Defaults to ``None``.
-            modalities (List[str], optional): List of modalities to process. Defaults to ``None``.
+            images (Optional[Union[torch.Tensor, List[torch.Tensor]]]): Image tensor.
+            image_sizes (Optional[Tuple[int, int]], optional): Sizes of images, if available. Defaults to ``None``.
+            modalities (Optional[List[str]], optional): List of modalities to process. Defaults to ``None``.
 
         Returns:
             Any: A tuple containing:
@@ -388,10 +388,12 @@ class LlavaMetaForCausalLM(ABC):
                                 for _ in range(image_feature.shape[0]):
                                     if _ % self.config.faster_token_stride == 0:
                                         concat_slow_fater_token.append(
-                                            torch.cat((image_feature[_], self.model.faster_token[None].to(image_feature.device)), dim=0))
+                                            torch.cat((image_feature[_], self.model.faster_token[None].to(image_feature.device)), dim=0)
+                                        )
                                     else:
                                         concat_slow_fater_token.append(
-                                            torch.cat((faster_video_feature[_], self.model.faster_token[None].to(image_feature.device)), dim=0))
+                                            torch.cat((faster_video_feature[_], self.model.faster_token[None].to(image_feature.device)), dim=0)
+                                        )
                                 image_feature = torch.cat(concat_slow_fater_token)
 
                             new_image_features.append(image_feature)
@@ -404,11 +406,8 @@ class LlavaMetaForCausalLM(ABC):
                         elif mm_newline_position == "one_token":
                             # one-token
                             image_feature = image_feature.flatten(0, 1)
-                            if 'unpad' in mm_patch_merge_type:
-                                image_feature = torch.cat((
-                                    image_feature,
-                                    self.model.image_newline[None].to(image_feature.device)
-                                ), dim=0)
+                            if "unpad" in mm_patch_merge_type:
+                                image_feature = torch.cat((image_feature, self.model.image_newline[None].to(image_feature.device)), dim=0)
                             new_image_features.append(image_feature)
                         elif mm_newline_position == "no_token":
                             new_image_features.append(image_feature.flatten(0, 1))
@@ -446,7 +445,7 @@ class LlavaMetaForCausalLM(ABC):
                         if "maxpool2x2" in mm_patch_merge_type:
                             image_feature = image_feature.permute(4, 0, 2, 1, 3).contiguous()
                             image_feature = image_feature.flatten(1, 2).flatten(2, 3)
-                            image_feature = nn.functional.max_pool2d(image_feature, 2)
+                            image_feature = F_torch.max_pool2d(image_feature, 2)
                             image_feature = image_feature.flatten(1, 2).transpose(0, 1)
                         elif "unpad" in mm_patch_merge_type and "anyres_max" in image_aspect_ratio and matched_anyres_max_num_patches:
                             unit = image_feature.shape[2]
@@ -457,7 +456,7 @@ class LlavaMetaForCausalLM(ABC):
                             times = math.sqrt(h * w / (max_num_patches * unit ** 2))
                             if times > 1.1:
                                 image_feature = image_feature[None]
-                                image_feature = nn.functional.interpolate(image_feature, [int(h // times), int(w // times)], mode="bilinear")[0]
+                                image_feature = F_torch.interpolate(image_feature, [int(h // times), int(w // times)], mode="bilinear")[0]
                             image_feature = torch.cat((image_feature, self.model.image_newline[:, None, None].expand(*image_feature.shape[:-1], 1).to(
                                 image_feature.device)), dim=-1)
                             image_feature = image_feature.flatten(1, 2).transpose(0, 1)
@@ -476,7 +475,7 @@ class LlavaMetaForCausalLM(ABC):
                         else:
                             image_feature = torch.cat((base_image_feature, image_feature), dim=0)
                         new_image_features.append(image_feature)
-                    else:  # single image operations
+                    else:  # single image operations.
                         image_feature = image_feature[0]
                         if "unpad" in mm_patch_merge_type:
                             image_feature = torch.cat((image_feature, self.model.image_newline[None]), dim=0)

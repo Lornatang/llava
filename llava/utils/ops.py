@@ -642,18 +642,22 @@ def unpad_image(x: torch.Tensor, original_size: Tuple[int, int]) -> torch.Tensor
     original_width, original_height = original_size
     current_height, current_width = x.shape[1:]
 
+    # Compute aspect ratios.
     original_aspect_ratio = original_width / original_height
     current_aspect_ratio = current_width / current_height
 
+    # Determine padding size and direction.
     if original_aspect_ratio > current_aspect_ratio:
+        # Padding was added to the height.
         scale_factor = current_width / original_width
         new_height = int(original_height * scale_factor)
         padding = (current_height - new_height) // 2
-        unpadded_tensor = x[:, padding:current_height - padding, :]
+        unpadded_x = x[:, padding: current_height - padding, :]
     else:
+        # Padding was added to the width.
         scale_factor = current_height / original_height
         new_width = int(original_width * scale_factor)
         padding = (current_width - new_width) // 2
-        unpadded_tensor = x[:, :, padding:current_width - padding]
+        unpadded_x = x[:, :, padding: current_width - padding]
 
-    return unpadded_tensor
+    return unpadded_x
