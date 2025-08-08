@@ -13,10 +13,10 @@
 # ==============================================================================
 import ast
 import base64
-from io import BytesIO
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
-
 import math
+from io import BytesIO
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
+
 import requests
 import torch
 import torch.distributed as dist
@@ -24,16 +24,58 @@ import transformers
 from PIL import Image
 from deepspeed import zero
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
-
 from llava.constants import IMAGE_TOKEN_INDEX
+
 from .events import LOGGER
 
 __all__ = [
-    "convert_expand_to_square", "divide_to_patches", "extract_patches", "find_all_linear_names", "get_anyres_image_grid_shape",
-    "get_model_name_from_path", "get_peft_state_maybe_zero_3", "get_peft_state_non_lora_maybe_zero_3", "get_mm_adapter_state_maybe_zero_3",
-    "load_image", "load_image_from_base64", "maybe_zero_3", "process_anyres_image", "process_highres_image", "process_highres_image_crop_split",
-    "process_images", "rank0_print", "resize_and_pad_image", "select_best_resolution", "split_to_even_chunks", "tokenizer_image_token", "unpad_image",
+    "KeywordsStoppingCriteria", "convert_expand_to_square", "divide_to_patches", "extract_patches", "find_all_linear_names",
+    "get_anyres_image_grid_shape", "get_model_name_from_path", "get_peft_state_maybe_zero_3", "get_peft_state_non_lora_maybe_zero_3",
+    "get_mm_adapter_state_maybe_zero_3", "load_image", "load_image_from_base64", "maybe_zero_3", "process_anyres_image", "process_highres_image",
+    "process_highres_image_crop_split", "process_images", "rank0_print", "resize_and_pad_image", "select_best_resolution", "split_to_even_chunks",
+    "tokenizer_image_token", "unpad_image",
 ]
+
+
+class KeywordsStoppingCriteria(transformers.StoppingCriteria):
+    """Stopping criteria that terminates generation when any keyword appears."""
+
+    def __init__(self, keywords: Sequence[str], tokenizer: Any, input_ids: torch.Tensor) -> None:
+        self.keywords: Sequence[str] = keywords
+        self.keyword_ids: List[torch.Tensor] = []
+        for keyword in keywords:
+            cur_keyword_ids = tokenizer(keyword).input_ids
+            # Some tokenizers return bos token at front; drop it if present.
+            if len(cur_keyword_ids) > 1 and cur_keyword_ids[0] == tokenizer.bos_token_id:
+                cur_keyword_ids = cur_keyword_ids[1:]
+            # store as torch tensor for fast comparison on the device used by output_ids
+            self.keyword_ids.append(torch.tensor(cur_keyword_ids))
+
+        self.tokenizer = tokenizer
+        self.start_len = input_ids.shape[1]
+
+    def __call__(self, output_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs) -> bool:
+        """Return True if generation should stop.
+
+        Args:
+            output_ids (torch.LongTensor): Generated token ids (batch_size, seq_len).
+            scores (torch.FloatTensor): Model scores for the generated tokens (unused here).
+            **kwargs: Additional keyword args (ignored).
+
+        Returns:
+            bool: True if any keyword condition is met and generation should stop.
+        """
+        assert output_ids.shape[0] == 1, "Only support batch size 1 (yet)"  # TODO
+        offset = min(output_ids.shape[1] - self.start_len, 3)
+        self.keyword_ids = [keyword_id.to(output_ids.device) for keyword_id in self.keyword_ids]
+        for keyword_id in self.keyword_ids:
+            if output_ids[0, -keyword_id.shape[0]:] == keyword_id:
+                return True
+        outputs = self.tokenizer.batch_decode(output_ids[:, -offset:], skip_special_tokens=True)[0]
+        for keyword in self.keywords:
+            if keyword in outputs:
+                return True
+        return False
 
 
 def convert_expand_to_square(pil_image: Image.Image, background_color: Union[Tuple[int, ...], int]) -> Image.Image:

@@ -19,20 +19,20 @@ from transformers import TextStreamer
 from llava.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.conversation import conv_templates, SeparatorStyle
 from llava.utils.checkpoint import load_pretrained
-from llava.utils.ops import load_image, process_images, tokenizer_image_token
+from llava.utils.ops import KeywordsStoppingCriteria, load_image, tokenizer_image_token
 from llava.utils.torch_utils import disable_torch_init
 
 
 def get_opts() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--image-file",
+        "-i", "--image-path",
         type=str,
         required=True,
         help="Path to the image file to be processed.",
     )
     parser.add_argument(
-        "--model",
+        "--model-path",
         type=str,
         required=True,
         help="Path to the pretrained model or model name.",
@@ -44,9 +44,14 @@ def get_opts() -> argparse.Namespace:
         help="Conversation mode to use.",
     )
     parser.add_argument(
-        "--load-in-8bit",
+        "--load-8bit",
         action="store_true",
         help="Whether to load the model in 8-bit mode.",
+    )
+    parser.add_argument(
+        "--load-4bit",
+        action="store_true",
+        help="Whether to load the model in 4-bit mode.",
     )
     parser.add_argument(
         "--temperature",
@@ -57,31 +62,27 @@ def get_opts() -> argparse.Namespace:
     parser.add_argument(
         "--max-new-tokens",
         type=int,
-        default=512,
-        help="Maximum number of new tokens to generate. Default is 512.",
+        default=1024,
+        help="Maximum number of new tokens to generate. Default is 1024.",
     )
     return parser.parse_args()
 
 
 def cli(
-        image_file: str,
-        model: str,
+        image_path: str,
+        model_path: str,
         conv_mode: str,
-        load_in_8bit: bool = False,
+        load_8bit: bool = False,
+        load_4bit: bool = False,
         temperature: float = 0.2,
-        max_new_tokens: int = 512,
-        device: str = "cuda",
+        max_new_tokens: int = 1024,
 ) -> None:
     disable_torch_init()
 
-    tokenizer, model, image_processor = load_pretrained(model, load_in_8bit, device)
+    tokenizer, model, image_processor, _ = load_pretrained(model_path, load_8bit, load_4bit)
 
-    image = load_image(image_file)
-    image_tensor = process_images([image], image_processor, model.config)
-    if type(image_tensor) is list:
-        image_tensor = [image.to(model.device, dtype=torch.float16) for image in image_tensor]
-    else:
-        image_tensor = image_tensor.to(model.device, dtype=torch.float16)
+    image = load_image(image_path)
+    image_tensor = image_processor.preprocess(image, return_tensors="pt")["pixel_values"].half().cuda()
 
     conv = conv_templates[conv_mode].copy()
     while True:
@@ -95,34 +96,38 @@ def cli(
 
         print(f"Assistant: ", end="")
 
-        if image is not None and len(conv.messages) == 0:
+        if image is not None:
             if model.config.mm_use_im_start_end:
                 inputs = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN + "\n" + inputs
             else:
                 inputs = DEFAULT_IMAGE_TOKEN + "\n" + inputs
-
-        conv.append_message(conv.roles[0], inputs)
+            conv.append_message(conv.roles[0], inputs)
+            image = None
+        else:
+            conv.append_message(conv.roles[0], inputs)
         conv.append_message(conv.roles[1], None)
         prompt = conv.get_prompt()
 
-        input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt").unsqueeze(0).to(model.device)
+        input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt").unsqueeze(0).cuda()
         attention_mask = (input_ids != tokenizer.pad_token_id).long()
         stop_str = conv.sep if conv.sep_style != SeparatorStyle.VICUNA_V1 else conv.sep2
         keywords = [stop_str]
+        stopping_criteria = KeywordsStoppingCriteria(keywords, tokenizer, input_ids)
         streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
         with torch.inference_mode():
             output_ids = model.generate(
                 input_ids,
-                images=image_tensor,
-                image_sizes=[image.size],
+                image_tensor,
                 attention_mask=attention_mask,
-                do_sample=True if temperature > 0 else False,
+                do_sample=True,
                 temperature=temperature,
                 max_new_tokens=max_new_tokens,
                 streamer=streamer,
-                use_cache=True)
+                use_cache=True,
+                stopping_criteria=[stopping_criteria],
+            )
 
-        outputs = tokenizer.decode(output_ids[0]).strip()
+        outputs = tokenizer.decode(output_ids[0, input_ids.shape[1]:]).strip()
         conv.messages[-1][-1] = outputs
 
 
