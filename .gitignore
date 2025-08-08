@@ -55,9 +55,9 @@ _darcs/
 *.WEBP
 
 # project dirs
-#*.sh
+*.sh
 *.yaml
 datasets/
 results/
-#tools/
+tools/
 wandb/
