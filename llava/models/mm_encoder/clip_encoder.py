@@ -16,7 +16,9 @@ from typing import Any, List, Union
 import torch
 from torch import nn
 from transformers import CLIPVisionModel, CLIPImageProcessor, CLIPVisionConfig
-from llava.utils.ops import rank0_print
+
+from llava.utils.events import LOGGER
+
 __all__ = [
     "CLIPVisionTower",
 ]
@@ -46,13 +48,13 @@ class CLIPVisionTower(nn.Module):
         self.select_feature: str = getattr(args, "mm_vision_select_feature", "patch")
 
         if not delay_load:
-            rank0_print(f"Loading vision tower: {vision_tower}")
+            LOGGER.info(f"Loading vision tower: {vision_tower}")
             self.load_model()
         elif getattr(args, "unfreeze_mm_vision_tower", False):
-            rank0_print(f"The checkpoint seems to contain `vision_tower` weights: `unfreeze_mm_vision_tower`: True.")
+            LOGGER.info(f"The checkpoint seems to contain `vision_tower` weights: `unfreeze_mm_vision_tower`: True.")
             self.load_model()
         elif hasattr(args, "mm_tunable_parts") and "mm_vision_tower" in args.mm_tunable_parts:
-            rank0_print(f"The checkpoint seems to contain `vision_tower` weights: `mm_tunable_parts` contains `mm_vision_tower`.")
+            LOGGER.info(f"The checkpoint seems to contain `vision_tower` weights: `mm_tunable_parts` contains `mm_vision_tower`.")
             self.load_model()
         else:
             self.cfg_only = CLIPVisionConfig.from_pretrained(self.vision_tower_name)
@@ -86,7 +88,7 @@ class CLIPVisionTower(nn.Module):
             device_map (Any, optional): Device map for model loading. Defaults to None.
         """
         if self.is_loaded:
-            print(f"{self.vision_tower_name} is already loaded, `load_model` called again, skipping.")
+            LOGGER.info(f"{self.vision_tower_name} is already loaded, `load_model` called again, skipping.")
             return
 
         self.image_processor = CLIPImageProcessor.from_pretrained(self.vision_tower_name)
@@ -109,13 +111,30 @@ class CLIPVisionTower(nn.Module):
         Raises:
             ValueError: If `self.select_feature` is not a supported type.
         """
-        image_features = image_forward_outs.hidden_states[self.select_layer]
-        if self.select_feature == "patch":
+        select_feature_type = self.select_feature
+
+        if self.select_feature in ["slicefour_patch", "slicefour_cls_patch"]:
+            select_every_k_layer = len(image_forward_outs.hidden_states) // 4
+            image_features = torch.cat(
+                [
+                    image_forward_outs.hidden_states[i]
+                    for i in range(select_every_k_layer + self.select_layer, len(image_forward_outs.hidden_states), select_every_k_layer)
+                ],
+                dim=-1)
+            select_feature_type = select_feature_type.replace("slicefour_", "")
+        elif self.select_feature in ["slice_m25811_f6_patch", "slice_m25811_f6_cls_patch"]:
+            select_layers = [-2, -5, -8, -11, 6]
+            image_features = torch.cat([image_forward_outs.hidden_states[i] for i in select_layers], dim=-1)
+            select_feature_type = select_feature_type.replace("slice_m25811_f6_", "")
+        else:
+            image_features = image_forward_outs.hidden_states[self.select_layer]
+
+        if select_feature_type == "patch":
             image_features = image_features[:, 1:]
-        elif self.select_feature == "cls_patch":
+        elif select_feature_type == "cls_patch":
             image_features = image_features
         else:
-            raise ValueError(f"Unexpected select feature: {self.select_feature}")
+            raise ValueError(f"Unexpected select feature: {select_feature_type}")
         return image_features
 
     @property
@@ -158,13 +177,22 @@ class CLIPVisionTower(nn.Module):
             return self.cfg_only
 
     @property
+    def image_size(self):
+        return self.config.image_size
+
+    @property
     def hidden_size(self) -> int:
         """Returns the hidden size of the vision tower model.
 
         Returns:
             int: The hidden size.
         """
-        return self.config.hidden_size
+        _hidden_size = self.config.hidden_size
+        if "slicefour" in self.select_feature:
+            _hidden_size *= 4
+        if "slice_m25811_f6" in self.select_feature:
+            _hidden_size *= 5
+        return _hidden_size
 
     @property
     def num_patches_per_side(self) -> int:
@@ -182,4 +210,7 @@ class CLIPVisionTower(nn.Module):
         Returns:
             int: Total number of patches.
         """
-        return (self.config.image_size // self.config.patch_size) ** 2
+        _num_patches = (self.config.image_size // self.config.patch_size) ** 2
+        if "cls_patch" in self.select_feature:
+            _num_patches += 1
+        return _num_patches

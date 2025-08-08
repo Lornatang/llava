@@ -11,17 +11,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-import math
 import random
 import re
 from abc import ABC, abstractmethod
 from typing import Any, List, Optional, Tuple, Union
 
+import math
 import torch
 from torch import nn
 from torch.nn import functional as F_torch
 
 from llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
+from llava.utils.events import LOGGER
 from llava.utils.ops import get_anyres_image_grid_shape, rank0_print, unpad_image
 from .mm_encoder.builder import build_vision_tower
 from .mm_encoder.clip_encoder import CLIPVisionTower
@@ -204,6 +205,8 @@ class LlavaMetaForCausalLM(ABC):
         Returns:
             torch.Tensor: Encoded image features.
         """
+        #  UserWarning: Dynamo does not know how to trace the builtin `<unknown module>.pybind11_object.__new__.`
+        #  This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
         image_features = self.get_model().get_vision_tower()(images)
         image_features = self.get_model().mm_projector(image_features)
         return image_features
@@ -434,7 +437,7 @@ class LlavaMetaForCausalLM(ABC):
                                     vision_tower_image_size,
                                 )
                             except Exception as e:
-                                rank0_print(f"Error: {e}")
+                                LOGGER.error(e)
                                 num_patch_width, num_patch_height = 2, 2
                             image_feature = image_feature.view(num_patch_height, num_patch_width, height, width, -1)
                         else:
