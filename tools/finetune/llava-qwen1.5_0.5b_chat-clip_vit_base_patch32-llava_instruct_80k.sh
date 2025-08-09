@@ -45,6 +45,7 @@ torchrun --nproc_per_node=1 --nnodes=1 --node_rank=0 --master_addr=127.0.0.1 --m
     --lazy_preprocess True \
     --report_to "wandb" \
     --run_name "llava-qwen1.5_0.5b_chat-clip_vit_base_patch32-llava_instruct_80k" \
+    --attn_implementation "sdpa" \
     --torch_compile True \
     --torch_compile_backend "eager" \
     --dataloader_drop_last True \

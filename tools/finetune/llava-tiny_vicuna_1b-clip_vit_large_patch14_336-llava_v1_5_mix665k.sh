@@ -45,6 +45,7 @@ torchrun --nproc_per_node=1 --nnodes=1 --node_rank=0 --master_addr=127.0.0.1 --m
     --lazy_preprocess True \
     --report_to "wandb" \
     --run_name "llava-tiny_vicuna_1b-clip_vit_large_patch14_336-llava_v1_5_mix665k" \
+    --attn_implementation "sdpa" \
     --torch_compile True \
     --torch_compile_backend "eager" \
     --dataloader_drop_last True \
