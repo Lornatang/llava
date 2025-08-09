@@ -73,7 +73,7 @@ Please place the downloaded files into the datasets directory according to the f
         - ocr_vqa
             - images
         - textvqa
-            - train_val_images
+            - train_images
         - vg
             - VG_100K
             - VG_100K_2
