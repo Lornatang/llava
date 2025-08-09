@@ -9,7 +9,7 @@ export TOKENIZERS_PARALLELISM=false
 torchrun --nproc_per_node=1 --nnodes=1 --node_rank=0 --master_addr=127.0.0.1 --master_port=10000 \
     ./tools/train.py \
     --deepspeed ./tools/zero3.json \
-    --model_name_or_path "./results/pretrained_models/lmsys/vicuna-13b-v1.5" \
+    --model_name_or_path "./results/pretrained_models/Jiayi-Pan/Tiny-Vicuna-1B" \
     --version "vicuna_v1" \
     --data_path "./datasets/llava_finetune/llava_v1_5_mix665k.json" \
     --image_folder "./datasets/llava_finetune" \
@@ -24,7 +24,7 @@ torchrun --nproc_per_node=1 --nnodes=1 --node_rank=0 --master_addr=127.0.0.1 --m
     --image_aspect_ratio "anyres_max_9" \
     --image_grid_pinpoints  "(1x1),...,(6x6)" \
     --mm_patch_merge_type "spatial_unpad" \
-    --output_dir "./results/finetune/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-llava_v1_5_mix665k" \
+    --output_dir "./results/finetune/llava-tiny_vicuna_1b-clip_vit_large_patch14_336-llava_v1_5_mix665k" \
     --num_train_epochs 1 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 4 \
@@ -44,7 +44,7 @@ torchrun --nproc_per_node=1 --nnodes=1 --node_rank=0 --master_addr=127.0.0.1 --m
     --dataloader_num_workers 4 \
     --lazy_preprocess True \
     --report_to "wandb" \
-    --run_name "llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-llava_v1_5_mix665k" \
+    --run_name "llava-tiny_vicuna_1b-clip_vit_large_patch14_336-llava_v1_5_mix665k" \
     --torch_compile True \
     --torch_compile_backend "eager" \
     --dataloader_drop_last True \

@@ -12,7 +12,7 @@ torchrun --nproc_per_node=1 --nnodes=1 --node_rank=0 --master_addr=127.0.0.1 --m
     --model_name_or_path "./results/pretrained_models/Qwen/Qwen1.5-0.5B-Chat" \
     --version "qwen1_5" \
     --data_path "./datasets/llava_finetune/llava_v1_5_mix665k.json" \
-    --image_folder "./datasets/llava_finetune/coco/train2017" \
+    --image_folder "./datasets/llava_finetune" \
     --mm_tunable_parts="mm_vision_tower,mm_mlp_adapter,mm_language_model" \
     --mm_vision_tower_lr=2e-6 \
     --vision_tower "./results/pretrained_models/openai/clip-vit-base-patch32" \
