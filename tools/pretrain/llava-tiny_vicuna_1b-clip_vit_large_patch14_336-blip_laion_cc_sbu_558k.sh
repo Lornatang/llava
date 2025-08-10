@@ -14,7 +14,7 @@ torchrun --nproc_per_node=1 --nnodes=1 --node_rank=0 --master_addr=127.0.0.1 --m
     --data_path "./datasets/llava_pretrain/blip_laion_cc_sbu_558k.json" \
     --image_folder "./datasets/llava_pretrain/images" \
     --vision_tower "./results/pretrained_models/openai/clip-vit-large-patch14-336" \
-    --mm_tunable_parts="mm_mlp_adapter" \
+    --mm_tunable_parts "mm_mlp_adapter" \
     --mm_vision_select_layer -2 \
     --mm_projector_type "mlp2x_gelu" \
     --mm_use_im_start_end False \

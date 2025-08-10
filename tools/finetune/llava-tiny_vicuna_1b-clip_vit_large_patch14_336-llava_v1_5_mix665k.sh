@@ -13,8 +13,8 @@ torchrun --nproc_per_node=1 --nnodes=1 --node_rank=0 --master_addr=127.0.0.1 --m
     --version "vicuna_v1" \
     --data_path "./datasets/llava_finetune/llava_v1_5_mix665k.json" \
     --image_folder "./datasets/llava_finetune" \
-    --mm_tunable_parts="mm_vision_tower,mm_mlp_adapter,mm_language_model" \
-    --mm_vision_tower_lr=2e-6 \
+    --mm_tunable_parts "mm_vision_tower,mm_mlp_adapter,mm_language_model" \
+    --mm_vision_tower_lr 2e-6 \
     --vision_tower "./results/pretrained_models/openai/clip-vit-large-patch14-336" \
     --mm_projector_type "mlp2x_gelu" \
     --mm_vision_select_layer -2 \

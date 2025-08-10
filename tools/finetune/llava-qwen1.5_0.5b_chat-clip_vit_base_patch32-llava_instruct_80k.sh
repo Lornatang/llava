@@ -13,8 +13,8 @@ torchrun --nproc_per_node=1 --nnodes=1 --node_rank=0 --master_addr=127.0.0.1 --m
     --version "qwen1_5" \
     --data_path "./datasets/llava_finetune/llava_instruct_80k.json" \
     --image_folder "./datasets/llava_finetune/coco/train2017" \
-    --mm_tunable_parts="mm_vision_tower,mm_mlp_adapter,mm_language_model" \
-    --mm_vision_tower_lr=2e-6 \
+    --mm_tunable_parts "mm_vision_tower,mm_mlp_adapter,mm_language_model" \
+    --mm_vision_tower_lr 2e-6 \
     --vision_tower "./results/pretrained_models/openai/clip-vit-base-patch32" \
     --mm_projector_type "mlp2x_gelu" \
     --mm_vision_select_layer -2 \
@@ -38,7 +38,7 @@ torchrun --nproc_per_node=1 --nnodes=1 --node_rank=0 --master_addr=127.0.0.1 --m
     --lr_scheduler_type "cosine" \
     --logging_steps 1 \
     --bf16 True \
-    --tf32 True \
+    --tf32 False \
     --model_max_length 32768 \
     --gradient_checkpointing True \
     --dataloader_num_workers 4 \
