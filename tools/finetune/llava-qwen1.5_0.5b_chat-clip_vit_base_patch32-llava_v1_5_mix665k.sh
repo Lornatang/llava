@@ -1,12 +1,12 @@
 export OMP_NUM_THREADS=8
 export NCCL_IB_DISABLE=0
 export NCCL_IB_GID_INDEX=3
-export NCCL_SOCKET_IFNAME=enp6s0
+export NCCL_SOCKET_IFNAME=eno1
 export NCCL_DEBUG=INFO
 export ACCELERATE_CPU_AFFINITY=1
 export TOKENIZERS_PARALLELISM=false
 
-torchrun --nproc_per_node=2 --nnodes=1 --node_rank=0 --master_addr=127.0.0.1 --master_port=10000 \
+torchrun --nproc_per_node=1 --nnodes=1 --node_rank=0 --master_addr=127.0.0.1 --master_port=10000 \
     ./tools/train.py \
     --deepspeed ./tools/zero3.json \
     --model_name_or_path "./results/pretrained_models/Qwen/Qwen1.5-0.5B-Chat" \
