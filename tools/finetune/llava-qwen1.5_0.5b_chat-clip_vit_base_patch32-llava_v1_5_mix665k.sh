@@ -24,7 +24,7 @@ torchrun --nproc_per_node=2 --nnodes=1 --node_rank=0 --master_addr=127.0.0.1 --m
     --image_aspect_ratio "anyres_max_9" \
     --image_grid_pinpoints  "(1x1),...,(6x6)" \
     --mm_patch_merge_type "spatial_unpad" \
-    --output_dir "./results/finetune/llava-qwen1.5_0.5b_chat-clip_vit_base_patch32-llava_instruct_80k" \
+    --output_dir "./results/finetune/llava-qwen1.5_0.5b_chat-clip_vit_base_patch32-llava_v1_5_mix665k" \
     --num_train_epochs 1 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 4 \
@@ -44,7 +44,7 @@ torchrun --nproc_per_node=2 --nnodes=1 --node_rank=0 --master_addr=127.0.0.1 --m
     --dataloader_num_workers 4 \
     --lazy_preprocess True \
     --report_to "wandb" \
-    --run_name "llava-qwen1.5_0.5b_chat-clip_vit_base_patch32-llava_instruct_80k" \
+    --run_name "llava-qwen1.5_0.5b_chat-clip_vit_base_patch32-llava_v1_5_mix665k" \
     --attn_implementation "sdpa" \
     --torch_compile True \
     --torch_compile_backend "eager" \
