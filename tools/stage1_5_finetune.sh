@@ -15,13 +15,15 @@ MASTER_ADDR="127.0.0.1"
 MASTER_PORT=$(shuf -i 10000-19999 -n 1)
 
 # Data Configuration.
-DATA_PATH="./datasets/stage1_data.yaml"
-IMAGE_FOLDER="./datasets/llava_pretrain/images"
+DATA_PATH="./datasets/stage1_5_data.yaml"
+IMAGE_FOLDER="./datasets/llava_finetune"
 
 # Train Configuration.
+VERSION="vicuna_v1"
 MODEL_PATH="./results/pretrained_models/lmsys/vicuna-13b-v1.5"
 VISION_MODEL_PATH="./results/pretrained_models/openai/clip-vit-large-patch14-336"
-RUN_NAME="llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-stage1_data"
+PRETRAIN_MM_MLP_ADAPTER_PATH="./results/stage_1_pretrain/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-stage1_data/mm_projector.bin"
+RUN_NAME="llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-stage1_5_data"
 ATTN_IMPLEMENTATION="flash_attention_2"
 TORCH_COMPILE_BACKEND="inductor"
 DEEPSPEED_CONFIG="./tools/zero3.json"
@@ -32,31 +34,37 @@ torchrun --nproc_per_node=${NPROC_PER_NODE} \
          --master_port=${MASTER_PORT} \
          ./tools/train.py \
          --model_name_or_path ${MODEL_PATH} \
-         --version "llava_plain" \
+         --version ${VERSION} \
          --data_path ${DATA_PATH} \
          --image_folder ${IMAGE_FOLDER} \
          --vision_tower ${VISION_MODEL_PATH} \
-         --mm_tunable_parts "mm_mlp_adapter" \
+         --pretrain_mm_mlp_adapter ${PRETRAIN_MM_MLP_ADAPTER_PATH} \
+         --mm_tunable_parts "mm_vision_tower,mm_mlp_adapter,mm_language_model" \
+         --mm_vision_tower_lr 2e-6 \
          --mm_vision_select_layer -2 \
          --mm_projector_type "mlp2x_gelu" \
          --mm_use_im_start_end False \
          --mm_use_im_patch_token False \
-         --output_dir "./results/stage_1_pretrain/${RUN_NAME}" \
+         --mm_patch_merge_type "spatial_unpad" \
+         --image_aspect_ratio "anyres_max_9" \
+         --image_grid_pinpoints  "(1x1),...,(6x6)" \
+         --group_by_modality_length True \
+         --output_dir "./results/stage_1_5_finetune/${RUN_NAME}" \
          --num_train_epochs 1 \
-         --per_device_train_batch_size 16 \
-         --gradient_accumulation_steps 1 \
+         --per_device_train_batch_size 1 \
+         --gradient_accumulation_steps 2 \
          --dataloader_drop_last True \
-         --learning_rate 1e-3 \
-         --lr_scheduler_type "cosine" \
-         --weight_decay 0. \
-         --warmup_ratio 0.03 \
          --save_strategy "steps" \
          --save_steps 1000 \
          --save_total_limit 1 \
+         --learning_rate 1e-5 \
+         --lr_scheduler_type "cosine" \
+         --weight_decay 0. \
+         --warmup_ratio 0.03 \
          --logging_steps 1 \
          --bf16 True \
          --tf32 True \
-         --model_max_length 8192 \
+         --model_max_length 32768 \
          --gradient_checkpointing True \
          --lazy_preprocess True \
          --report_to "wandb" \
