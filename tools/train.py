@@ -333,7 +333,7 @@ class LazySupervisedDataset(torch.utils.data.Dataset):
         super().__init__()
         rank0_print("Formatting inputs...Skip in lazy mode.")
         self.tokenizer: transformers.PreTrainedTokenizer = tokenizer
-        self.list_data_dict: List[Dict[str, str]] = json.load(open(data_path, "r"))
+        self.list_data_dict: List[Dict[str, str]] = []
         self.data_args: DataArguments = data_args
 
         if "{" in data_path and "}" in data_path:
