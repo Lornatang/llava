@@ -24,7 +24,7 @@ MODEL_PATH="./results/pretrained_models/lmsys/vicuna-13b-v1.5"
 VISION_MODEL_PATH="./results/pretrained_models/openai/clip-vit-large-patch14-336"
 PRETRAIN_MM_MLP_ADAPTER_PATH="./results/stage_1_pretrain/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-stage1_data/mm_projector.bin"
 RUN_NAME="llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-stage1_5_data"
-ATTN_IMPLEMENTATION="flash_attention_2"
+ATTN_IMPLEMENTATION="sdpa"  # "flash_attention_2" or "flash_attention_3" or "sdpa"
 TORCH_COMPILE_BACKEND="eager"
 DEEPSPEED_CONFIG="./tools/zero3.json"
 
