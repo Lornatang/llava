@@ -14,13 +14,12 @@
 import argparse
 
 import torch
-from transformers import TextStreamer
-
 from llava.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.conversation import conv_templates, SeparatorStyle
 from llava.utils.checkpoint import load_pretrained
 from llava.utils.ops import KeywordsStoppingCriteria, load_image, tokenizer_image_token
 from llava.utils.torch_utils import disable_torch_init
+from transformers import TextStreamer
 
 
 def get_opts() -> argparse.Namespace:

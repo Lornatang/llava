@@ -19,6 +19,7 @@ DATA_PATH="./datasets/stage1_data.yaml"
 IMAGE_FOLDER="./datasets/llava_pretrain/images"
 
 # Train Configuration.
+VERSION="llava_plain"
 MODEL_PATH="./results/pretrained_models/lmsys/vicuna-13b-v1.5"
 VISION_MODEL_PATH="./results/pretrained_models/openai/clip-vit-large-patch14-336"
 RUN_NAME="llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-stage1_data"
@@ -32,7 +33,7 @@ torchrun --nproc_per_node=${NPROC_PER_NODE} \
          --master_port=${MASTER_PORT} \
          ./tools/train.py \
          --model_name_or_path ${MODEL_PATH} \
-         --version "llava_plain" \
+         --version ${VERSION} \
          --data_path ${DATA_PATH} \
          --image_folder ${IMAGE_FOLDER} \
          --vision_tower ${VISION_MODEL_PATH} \
