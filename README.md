@@ -83,38 +83,24 @@ Please place the downloaded files into the datasets directory according to the f
 
 **You can try different combinations of visual language architectures as shown below!**
 
-- Vicuna-13B-v1.5 + CLIP-ViT-L-14-336px (default)
+We use [LLM(lmsys/vicuna-13b-v1.5)](https://huggingface.co/lmsys/vicuna-13b-v1.5) and [VIT(openai/clip-vit-large-patch14-336)](https://huggingface.co/openai/clip-vit-large-patch14-336) for the following examples, but you can also use other LLMs and VIT.
 
 ```shell
 hf download openai/clip-vit-large-patch14-336 --local-dir ./results/pretrained_models/openai/clip-vit-large-patch14-336
 hf download lmsys/vicuna-13b-v1.5 --local-dir ./results/pretrained_models/lmsys/vicuna-13b-v1.5
-# Pretrain
-bash ./tools/pretrain/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-blip_laion_cc_sbu_558k.sh
-# Finetune
-bash ./tools/finetune/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-llava_v1_5_mix665k.sh
+# Stage1: Pretrain (Visual Feature Alignment).
+bash ./tools/stage1_pretrain.sh
+# Stage2: Full Finetune (Instruction Tuning with Image-Text Pairs)
+bash ./tools/stage2_finetune.sh
 ```
 
-- TinyVicuna-1B + CLIP-ViT-L-14-336px
+# Acknowledgement
 
-```shell
-hf download openai/clip-vit-large-patch14-336 --local-dir ./results/pretrained_models/openai/clip-vit-large-patch14-336
-hf download Jiayi-Pan/Tiny-Vicuna-1B --local-dir ./results/pretrained_models/Jiayi-Pan/Tiny-Vicuna-1B
-# Pretrain
-bash ./tools/pretrain/llava-tiny_vicuna_1b-clip_vit_large_patch14_336-blip_laion_cc_sbu_558k.sh
-# Finetune
-bash ./tools/finetune/llava-tiny_vicuna_1b-clip_vit_large_patch14_336-llava_v1_5_mix665k.sh
-```
+- [LLaVA](https://github.com/haotian-liu/LLaVA): Providing the most original implementation, thanks.
+- [LLaVA-NeXT](https://github.com/LLaVA-VL/LLaVA-NeXT): Provide many methods that are beneficial to the implementation of this project.
+- [Vicuna](https://github.com/lm-sys/FastChat): Provides many optional multimodal data processing methods.
+- [Qwen](https://huggingface.co/Qwen): Provides LLM that is easy to fine-tune and has excellent performance.
 
-- Qwen1.5-0.5B-Chat + CLIP-ViT-B-32-224px
-
-```shell
-hf download openai/clip-vit-base-patch32 --local-dir ./results/pretrained_models/openai/clip-vit-base-patch32
-hf download Qwen/Qwen1.5-0.5B-Chat --local-dir ./results/pretrained_models/Jiayi-Pan/Tiny-Vicuna-1B
-# Pretrain
-bash ./tools/pretrain/llava-qwen1.5_0.5b_chat-clip_vit_base_patch32-blip_laion_cc_sbu_558k.sh
-# Finetune
-bash ./tools/finetune/llava-qwen1.5_0.5b_chat-clip_vit_base_patch32-llava_v1_5_mix665k.sh
-```
 ## Citation
 
 ```bibtex
