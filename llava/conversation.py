@@ -19,13 +19,12 @@ from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from PIL import Image
-
 from llava.utils.ops import convert_expand_to_square
 
 __all__ = [
     "SeparatorStyle", "Conversation",
     "conv_llava_plain", "conv_llava_vicuna_v1", "conv_llava_vicuna_v1_mmtag", "conv_llava_llama", "conv_llava_qwen1_5", "conv_llava_qwen2",
-    "conv_vicuna_v1", "conv_llama", "conv_qwen1_5", "conv_qwen2", "conv_templates", "default_conversation",
+    "conv_llava_qwen2_5", "conv_vicuna_v1", "conv_llama", "conv_qwen1_5", "conv_qwen2", "conv_qwen2_5", "conv_templates", "default_conversation",
 ]
 
 
@@ -440,6 +439,21 @@ conv_llava_qwen2 = Conversation(
     skip_next=False,
     version="llava_qwen2",
 )
+conv_llava_qwen2_5 = Conversation(
+    system="<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
+    roles=("<|im_start|>user", "<|im_start|>assistant"),
+    messages=[],
+    offset=0,
+    sep_style=SeparatorStyle.CHATML,
+    sep="<|im_end|>",
+    sep2=None,
+    tokenizer_id="",
+    tokenizer=None,
+    stop_str=None,
+    stop_token_ids=None,
+    skip_next=False,
+    version="llava_qwen2_5",
+)
 
 conv_vicuna_v1 = Conversation(
     system_message="A chat between a curious user and an artificial intelligence assistant. "
@@ -505,6 +519,21 @@ conv_qwen2 = Conversation(
     skip_next=False,
     version="qwen2",
 )
+conv_qwen2_5 = Conversation(
+    system="<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
+    roles=("<|im_start|>user", "<|im_start|>assistant"),
+    messages=[],
+    offset=0,
+    sep_style=SeparatorStyle.CHATML,
+    sep="<|im_end|>",
+    sep2=None,
+    tokenizer_id="",
+    tokenizer=None,
+    stop_str=None,
+    stop_token_ids=None,
+    skip_next=False,
+    version="qwen2_5",
+)
 
 conv_templates = {
     # pretrain.
@@ -514,11 +543,13 @@ conv_templates = {
     "llava_llama": conv_llava_llama,
     "llava_qwen1_5": conv_llava_qwen1_5,
     "llava_qwen2": conv_llava_qwen2,
+    "llava_qwen2_5": conv_llava_qwen2_5,
 
     # finetune.
     "vicuna_v1": conv_vicuna_v1,
     "llama": conv_llama,
     "qwen1_5": conv_qwen1_5,
     "qwen2": conv_qwen2,
+    "qwen2_5": conv_qwen2_5,
 }
 default_conversation = conv_templates["vicuna_v1"]

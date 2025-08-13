@@ -783,7 +783,11 @@ def preprocess(
         return preprocess_vicuna_v1(sources, tokenizer, has_image)
     if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.LLAMA:
         return preprocess_llama(sources, tokenizer, has_image)
-    if "qwen" in conversation_lib.default_conversation.version:
+    if (
+            "qwen1_5" in conversation_lib.default_conversation.version or
+            "qwen2" in conversation_lib.default_conversation.version or
+            "qwen2_5" in conversation_lib.default_conversation.version
+    ):
         return preprocess_qwen(sources, tokenizer, has_image)
 
     # add end signal and concatenate together.

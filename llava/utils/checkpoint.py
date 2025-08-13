@@ -81,7 +81,8 @@ def load_pretrained(
     else:
         if (
                 "qwen1.5" in model_path.lower() or
-                "qwen2" in model_path.lower()
+                "qwen2" in model_path.lower() or
+                "qwen2.5" in model_path.lower()
         ):
             tokenizer = AutoTokenizer.from_pretrained(model_path)
             if "moe" in model_path.lower() or "A14B" in model_path.lower():
