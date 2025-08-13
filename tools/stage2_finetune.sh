@@ -6,10 +6,11 @@ export ACCELERATE_CPU_AFFINITY=1
 export TOKENIZERS_PARALLELISM=false
 
 # Distributed Configuration.
-export NCCL_IB_DISABLE=0
-export NCCL_IB_GID_INDEX=3
-export NCCL_SOCKET_IFNAME=eno1
-export NCCL_DEBUG=INFO
+export NCCL_IB_DISABLE=1  # If has InfiniBand set to 0.
+export NCCL_IB_GID_INDEX=3  # ibv_devinfo -v.
+export NCCL_IB_HCA=mlx5_0  # Set to your InfiniBand HCA if available, otherwise can be omitted.
+export NCCL_SOCKET_IFNAME=eno1  # Aligning RoCE over Ethernet with netdev
+export NCCL_DEBUG=WARN  # Set to INFO for debugging, can be set to WARN or ERROR for production.
 NPROC_PER_NODE=$(nvidia-smi --list-gpus | wc -l)
 MASTER_ADDR="127.0.0.1"
 MASTER_PORT=$(shuf -i 10000-19999 -n 1)
@@ -61,7 +62,7 @@ torchrun --nproc_per_node=${NPROC_PER_NODE} \
          --lr_scheduler_type "cosine" \
          --weight_decay 0. \
          --warmup_ratio 0.03 \
-         --logging_steps 1 \
+         --logging_steps 10 \
          --bf16 True \
          --tf32 True \
          --model_max_length 32768 \
