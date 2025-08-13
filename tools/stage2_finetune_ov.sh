@@ -34,7 +34,7 @@ torchrun --nproc_per_node=${NPROC_PER_NODE} \
          --master_addr=${MASTER_ADDR} \
          --master_port=${MASTER_PORT} \
          ./tools/train.py \
-         --model_name_or_path ${MODEL_PATH} \
+         --model_path ${MODEL_PATH} \
          --version ${VERSION} \
          --data_path ${DATA_PATH} \
          --image_folder ${IMAGE_FOLDER} \

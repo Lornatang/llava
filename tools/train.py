@@ -129,7 +129,7 @@ def _add_speaker_and_signal(header: str, source: List, get_conversation: bool = 
 @dataclass
 class ModelArguments:
     """Arguments pertaining to which model/config/tokenizer we are going to fine-tune from."""
-    model_name_or_path: Optional[str] = field(default="lmsys/vicuna-13b-v1.5")
+    model_path: Optional[str] = field(default="./lmsys/vicuna-13b-v1.5")
 
     version: Optional[str] = field(default="vicuna_v1")
     freeze_backbone: bool = field(default=False)
@@ -642,7 +642,7 @@ def get_model(
 
     Args:
         model_args (Any): Namespace or dataclass with model-specific arguments,
-            such as `model_name_or_path` and any vision-tower flags.
+            such as `model_path` and any vision-tower flags.
         training_args (Any): HuggingFace `TrainingArguments` (or subclass) containing
             distributed training settings, precision flags, and `attn_implementation`.
         bnb_model_from_pretrained_args (Dict[str, Any]): Keyword args passed to
@@ -674,7 +674,7 @@ def get_model(
                 model_args.mm_resampler_type is not None,
             ]
     ):
-        cfg_pretrained = AutoConfig.from_pretrained(model_args.model_name_or_path)
+        cfg_pretrained = AutoConfig.from_pretrained(model_args.model_path)
 
     if model_args.use_pos_skipping is not None and model_args.pos_skipping_range is not None:
         overwrite_config["use_pos_skipping"] = model_args.use_pos_skipping
@@ -712,11 +712,11 @@ def get_model(
 
         customized_kwargs["config"] = cfg_pretrained
 
-    if "qwen" in model_args.model_name_or_path.lower():
-        if "moe" in model_args.model_name_or_path.lower() or "A14B" in model_args.model_name_or_path:  # TODO: implement Qwen2 MoE model.
+    if "qwen" in model_args.model_path.lower():
+        if "moe" in model_args.model_path.lower() or "A14B" in model_args.model_path:  # TODO: implement Qwen2 MoE model.
             raise "Qwen2 MoE model is not supported yet."
             # model = LlavaQwenMoeForCausalLM.from_pretrained(
-            #     model_args.model_name_or_path,
+            #     model_args.model_path,
             #     cache_dir=training_args.cache_dir,
             #     attn_implementation=training_args.attn_implementation,
             #     torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
@@ -726,7 +726,7 @@ def get_model(
             # deepspeed.utils.set_z3_leaf_modules(model, [Qwen2MoeSparseMoeBlock])
         else:
             model = LlavaQwen2ForCausalLM.from_pretrained(
-                model_args.model_name_or_path,
+                model_args.model_path,
                 cache_dir=training_args.cache_dir,
                 attn_implementation=training_args.attn_implementation,
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
@@ -734,11 +734,11 @@ def get_model(
                 **customized_kwargs,
             )
     elif (
-            "vicuna" in model_args.model_name_or_path.lower() or
-            "llama" in model_args.model_name_or_path.lower()
+            "vicuna" in model_args.model_path.lower() or
+            "llama" in model_args.model_path.lower()
     ):
         model = LlavaLlamaForCausalLM.from_pretrained(
-            model_args.model_name_or_path,
+            model_args.model_path,
             cache_dir=training_args.cache_dir,
             attn_implementation=training_args.attn_implementation,
             torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
@@ -1237,16 +1237,19 @@ def train(attn_implementation: str = None) -> None:
         model = get_peft_model(model, lora_config)
 
     # Load tokenizer.
-    if "qwen" in model_args.model_name_or_path.lower():
+    if (
+            "qwen1.5" in model_args.model_path.lower() or
+            "qwen2" in model_args.model_path.lower()
+    ):
         tokenizer = transformers.AutoTokenizer.from_pretrained(
-            model_args.model_name_or_path,
+            model_args.model_path,
             cache_dir=training_args.cache_dir,
             model_max_length=training_args.model_max_length,
             padding_side="right",
         )
     else:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
-            model_args.model_name_or_path,
+            model_args.model_path,
             cache_dir=training_args.cache_dir,
             model_max_length=training_args.model_max_length,
             padding_side="right",
