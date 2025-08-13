@@ -59,7 +59,6 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         super().__init__(
             config=config,
         )
-        config.model_type = "llava_llama"
         config.rope_scaling = None
 
         self.model: LlavaLlamaModel = LlavaLlamaModel(config)
