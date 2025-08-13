@@ -78,7 +78,10 @@ def load_pretrained(
     if "lora" in model_path.lower():  # TODO: Support LoRA.
         raise "Lora model is not supported in this function."
     else:
-        if "qwen2" in model_path.lower():
+        if (
+                "qwen1.5" in model_path.lower() or
+                "qwen2" in model_path.lower()
+            ):
             tokenizer = AutoTokenizer.from_pretrained(model_path)
             if "moe" in model_path.lower() or "A14B" in model_path.lower():
                 raise "LlavaQwen2MoeForCausalLM is not supported in this function."
