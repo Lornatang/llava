@@ -50,7 +50,7 @@ torchrun --nproc_per_node=${NPROC_PER_NODE} \
          --image_aspect_ratio "anyres_max_9" \
          --image_grid_pinpoints  "(1x1),...,(6x6)" \
          --group_by_modality_length True \
-         --output_dir "./results/stage_2_finetune/${RUN_NAME}" \
+         --output_dir "./results/stage2_finetune/${RUN_NAME}" \
          --num_train_epochs 1 \
          --per_device_train_batch_size 1 \
          --gradient_accumulation_steps 2 \
