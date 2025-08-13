@@ -21,7 +21,7 @@ from transformers import AutoTokenizer, BitsAndBytesConfig
 from llava.constants import DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.models.llm import LlavaLlamaConfig, LlavaLlamaForCausalLM, LlavaQwen2Config, LlavaQwen2ForCausalLM
 from .events import LOGGER
-from .ops import get_mm_adapter_state_maybe_zero_3, rank0_print
+from .ops import get_mm_adapter_state_maybe_zero_3
 
 __all__ = [
     "load_pretrained", "safe_save_model_for_hf_trainer",
@@ -81,7 +81,7 @@ def load_pretrained(
         if (
                 "qwen1.5" in model_path.lower() or
                 "qwen2" in model_path.lower()
-            ):
+        ):
             tokenizer = AutoTokenizer.from_pretrained(model_path)
             if "moe" in model_path.lower() or "A14B" in model_path.lower():
                 raise "LlavaQwen2MoeForCausalLM is not supported in this function."
@@ -192,7 +192,7 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
 
     trainer.accelerator.wait_for_everyone()
     torch.cuda.synchronize()
-    rank0_print(f"Only save projectors: {check_only_save_mm_adapter_tunnable}")
+    LOGGER.info(f"Only save projectors: {check_only_save_mm_adapter_tunnable}.")
     if check_only_save_mm_adapter_tunnable:
         # Only save Adapter
         keys_to_match = ["mm_projector", "vision_resampler"]

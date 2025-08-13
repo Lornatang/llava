@@ -32,7 +32,6 @@ from transformers.trainer import (
 
 from llava.data.sampler import LengthGroupedSampler
 from llava.utils.events import LOGGER
-from llava.utils.ops import rank0_print
 from llava.utils.torch_utils import seed_worker
 
 __all__ = [
@@ -91,7 +90,7 @@ class LLaVATrainer(Trainer):
         gradient_accumulation_plugin = GradientAccumulationPlugin(**grad_acc_kwargs)
 
         accelerator_kwargs = InitProcessGroupKwargs(timeout=timedelta(weeks=52))
-        rank0_print("Setting NCCL timeout to INF to avoid running errors.")
+        LOGGER.info("Setting NCCL timeout to INF to avoid running errors.")
 
         # create accelerator object.
         self.accelerator = Accelerator(

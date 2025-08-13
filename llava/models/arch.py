@@ -11,19 +11,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
+import math
 import random
 import re
 from abc import ABC, abstractmethod
 from typing import Any, List, Optional, Tuple, Union
 
-import math
 import torch
 from torch import nn
 from torch.nn import functional as F_torch
 
 from llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.utils.events import LOGGER
-from llava.utils.ops import get_anyres_image_grid_shape, rank0_print, unpad_image
+from llava.utils.ops import get_anyres_image_grid_shape, unpad_image
 from .mm_encoder.builder import build_vision_tower
 from .mm_encoder.clip_encoder import CLIPVisionTower
 from .mm_projector.builder import build_vision_projector
@@ -138,9 +138,9 @@ class LlavaMetaModel:
                 return {k.split(keyword + ".")[1]: v for k, v in weights.items() if keyword in k}
 
             incompatible_keys = self.mm_projector.load_state_dict(get_w(mm_projector_weights, "mm_projector"))
-            rank0_print(f"Loaded mm projector weights from {pretrain_mm_mlp_adapter}. Incompatible keys: {incompatible_keys}.")
+            LOGGER.info(f"Loaded mm projector weights from {pretrain_mm_mlp_adapter}. Incompatible keys: {incompatible_keys}.")
             incompatible_keys = self.vision_resampler.load_state_dict(get_w(mm_projector_weights, "vision_resampler"), strict=False)
-            rank0_print(f"Loaded vision resampler weights from {pretrain_mm_mlp_adapter}. Incompatible keys: {incompatible_keys}.")
+            LOGGER.info(f"Loaded vision resampler weights from {pretrain_mm_mlp_adapter}. Incompatible keys: {incompatible_keys}.")
 
 
 class LlavaMetaForCausalLM(ABC):

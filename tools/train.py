@@ -42,7 +42,7 @@ from llava.utils.checkpoint import safe_save_model_for_hf_trainer
 from llava.utils.events import LOGGER
 from llava.utils.ops import (
     find_all_linear_names, get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3, process_anyres_image, process_highres_image,
-    process_highres_image_crop_split, process_video_with_decord, rank0_print, tokenizer_image_token,
+    process_highres_image_crop_split, process_video_with_decord, tokenizer_image_token,
 )
 
 torch.multiprocessing.set_sharing_strategy("file_system")
@@ -331,7 +331,7 @@ class LazySupervisedDataset(torch.utils.data.Dataset):
             data_args (DataArguments): The data arguments containing paths and configurations.
         """
         super().__init__()
-        rank0_print("Formatting inputs...Skip in lazy mode.")
+        LOGGER.info("Formatting inputs...Skip in lazy mode.")
         self.tokenizer: transformers.PreTrainedTokenizer = tokenizer
         self.list_data_dict: List[Dict[str, str]] = []
         self.data_args: DataArguments = data_args
@@ -339,15 +339,15 @@ class LazySupervisedDataset(torch.utils.data.Dataset):
         if "{" in data_path and "}" in data_path:
             base_path, file_pattern = re.match(r"^(.*)\{(.*)}\.json$", data_path).groups()
             file_names = file_pattern.split(",")
-            rank0_print(f"Loading {file_names} from {base_path}.")
+            LOGGER.info(f"Loading {file_names} from {base_path}.")
             self.data_args.dataset_paths = []
             for file_name in file_names:
                 self.data_args.dataset_paths.append(f"{base_path}{file_name}.json")
                 full_path = f"{base_path}{file_name}.json"
-                rank0_print(f"Loading {full_path}")
+                LOGGER.info(f"Loading {full_path}")
                 with open(full_path, "r") as file:
                     cur_data_dict = json.load(file)
-                    rank0_print(f"Loaded {len(cur_data_dict)} samples from {full_path}")
+                    LOGGER.info(f"Loaded {len(cur_data_dict)} samples from {full_path}")
                     self.list_data_dict.extend(cur_data_dict)
         elif data_path.endswith(".yaml"):
             with open(data_path, "r") as file:
@@ -359,7 +359,7 @@ class LazySupervisedDataset(torch.utils.data.Dataset):
                     sampling_strategy = dataset.get("sampling_strategy", "all")
                     sampling_number = None
 
-                    rank0_print(f"Loading {json_path} with {sampling_strategy} sampling strategy.")
+                    LOGGER.info(f"Loading {json_path} with {sampling_strategy} sampling strategy.")
 
                     if json_path.endswith(".jsonl"):
                         cur_data_dict = []
@@ -388,18 +388,18 @@ class LazySupervisedDataset(torch.utils.data.Dataset):
                         random.shuffle(cur_data_dict)
                         cur_data_dict = cur_data_dict[:sampling_number]
 
-                    rank0_print(f"Loaded {len(cur_data_dict)} samples from {json_path}")
+                    LOGGER.info(f"Loaded {len(cur_data_dict)} samples from {json_path}")
                     self.list_data_dict.extend(cur_data_dict)
         else:
             self.data_args.dataset_paths = [data_path]
-            rank0_print(f"Loading {data_path}")
+            LOGGER.info(f"Loading {data_path}")
             with open(data_path, "r") as file:
                 cur_data_dict = json.load(file)
-                rank0_print(f"Loaded {len(cur_data_dict)} samples from {data_path}")
+                LOGGER.info(f"Loaded {len(cur_data_dict)} samples from {data_path}")
                 self.list_data_dict.extend(cur_data_dict)
 
-        rank0_print(f"Loaded {len(self.list_data_dict)} samples from {data_path}.")
-        rank0_print("Formatting inputs...Skip in lazy mode.")
+        LOGGER.info(f"Loaded {len(self.list_data_dict)} samples from {data_path}.")
+        LOGGER.info("Formatting inputs...Skip in lazy mode.")
 
     def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
         """Get an item from the dataset.
@@ -1233,7 +1233,7 @@ def train(attn_implementation: str = None) -> None:
                 model.to(torch.bfloat16)
             if training_args.fp16:
                 model.to(torch.float16)
-        rank0_print("Adding LoRA adapters...")
+        LOGGER.info("Adding LoRA adapters...")
         model = get_peft_model(model, lora_config)
 
     # Load tokenizer.

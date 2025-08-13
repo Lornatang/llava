@@ -21,7 +21,6 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 import numpy as np
 import requests
 import torch
-import torch.distributed as dist
 import transformers
 from PIL import Image
 from decord import VideoReader, cpu
@@ -35,7 +34,7 @@ __all__ = [
     "KeywordsStoppingCriteria", "convert_expand_to_square", "divide_to_patches", "extract_patches", "find_all_linear_names",
     "get_anyres_image_grid_shape", "get_model_name_from_path", "get_peft_state_maybe_zero_3", "get_peft_state_non_lora_maybe_zero_3",
     "get_mm_adapter_state_maybe_zero_3", "load_image", "load_image_from_base64", "maybe_zero_3", "process_anyres_image", "process_highres_image",
-    "process_highres_image_crop_split", "process_video_with_decord", "process_images", "rank0_print", "resize_and_pad_image",
+    "process_highres_image_crop_split", "process_video_with_decord", "process_images", "resize_and_pad_image",
     "select_best_resolution", "split_to_even_chunks", "tokenizer_image_token", "unpad_image",
 ]
 
@@ -538,19 +537,6 @@ def process_images(
     if all(x.shape == new_images[0].shape for x in new_images):
         new_images = torch.stack(new_images, dim=0)
     return new_images
-
-
-def rank0_print(*args) -> None:
-    """Prints messages only from the process with rank 0.
-
-    Args:
-        *args (Any): Variable length argument list to be printed.
-    """
-    if dist.is_initialized():
-        if dist.get_rank() == 0:
-            print(f"Rank {dist.get_rank()}: ", *args)
-    else:
-        print(*args)
 
 
 def resize_and_pad_image(
