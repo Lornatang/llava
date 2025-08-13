@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional, Tuple
 import torch
 import transformers
 from transformers import AutoTokenizer, BitsAndBytesConfig
+from peft import PeftModel
 
 from llava.constants import DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.models.llm import LlavaLlamaConfig, LlavaLlamaForCausalLM, LlavaQwen2Config, LlavaQwen2ForCausalLM
@@ -76,8 +77,53 @@ def load_pretrained(
     if customized_config is not None:
         kwargs["config"] = customized_config
 
-    if "lora" in model_path.lower():  # TODO: Support LoRA.
-        raise "Lora model is not supported in this function."
+    if "lora" in model_path.lower():
+        lora_cfg_pretrained = AutoConfig.from_pretrained(model_path)
+        tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=False)
+        LOGGER.info("Loading LLaVA from base model...")
+        if (
+                "qwen1.5" in model_path.lower() or
+                "qwen2" in model_path.lower() or
+                "qwen2.5" in model_path.lower()
+        ):
+            lora_cfg_pretrained = LlavaQwen2Config.from_pretrained(model_path)
+            tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=False)
+            model = LlavaQwen2ForCausalLM.from_pretrained(
+                model_base,
+                low_cpu_mem_usage=True,
+                config=lora_cfg_pretrained,
+                attn_implementation=attn_implementation,
+                **kwargs,
+            )
+        else:
+            lora_cfg_pretrained = LlavaLlamaConfig.from_pretrained(model_path)
+            tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=False)
+            model = LlavaLlamaForCausalLM.from_pretrained(
+                model_base,
+                low_cpu_mem_usage=True,
+                config=lora_cfg_pretrained,
+                attn_implementation=attn_implementation,
+                **kwargs,
+            )
+        token_num, tokem_dim = model.lm_head.out_features, model.lm_head.in_features
+        if model.lm_head.weight.shape[0] != token_num:
+            model.lm_head.weight = torch.nn.Parameter(torch.empty(token_num, tokem_dim, device=model.device, dtype=model.dtype))
+            model.model.embed_tokens.weight = torch.nn.Parameter(torch.empty(token_num, tokem_dim, device=model.device, dtype=model.dtype))
+
+        LOGGER.info("Loading additional LLaVA weights...")
+        non_lora_trainables_path = Path(model_path, "non_lora_trainables.bin")
+        if not non_lora_trainables_path.exists():
+            raise ValueError("non_lora_trainables.bin not found")
+        non_lora_trainables = torch.load(str(Path(model_path, "non_lora_trainables.bin")), map_location="cpu")
+        non_lora_trainables = {(k[11:] if k.startswith("base_model.") else k): v for k, v in non_lora_trainables.items()}
+        if any(k.startswith("model.model.") for k in non_lora_trainables):
+            non_lora_trainables = {(k[6:] if k.startswith("model.") else k): v for k, v in non_lora_trainables.items()}
+        model.load_state_dict(non_lora_trainables, strict=False)
+        LOGGER.info("Loading LoRA weights...")
+        model = PeftModel.from_pretrained(model, model_path)
+        LOGGER.info("Merging LoRA weights...")
+        model = model.merge_and_unload()
+        LOGGER.info("Model is loaded...")
     else:
         if (
                 "qwen1.5" in model_path.lower() or
