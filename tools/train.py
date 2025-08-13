@@ -295,9 +295,9 @@ class TrainingArguments(transformers.TrainingArguments):
         metadata={"help": "How many bits to use."},
     )
     lora_enable: bool = False
-    lora_r: int = 4  # 4(0.5B)/8(1B)/16(3B)/32(7B)/64(8B)/128(13B)
-    lora_alpha: int = 16  # 2~4 * lora_r
-    lora_dropout: float = 0.05  # 0.05(large data)/0.1(medium data)/0.2(small data)
+    lora_r: int = 128  # <=3B(16), <=7B(32), <=13B(64), <=32B(128)
+    lora_alpha: int = 256  # 2 * lora_r
+    lora_dropout: float = 0.05  # large data(0.05), medium data(0.1), small data(0.2)
     lora_weight_path: str = ""
     lora_bias: str = "none"
     mm_projector_lr: Optional[float] = None
