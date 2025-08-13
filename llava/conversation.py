@@ -440,7 +440,7 @@ conv_llava_qwen2 = Conversation(
     version="llava_qwen2",
 )
 conv_llava_qwen2_5 = Conversation(
-    system="<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
+    system_message="<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
     roles=("<|im_start|>user", "<|im_start|>assistant"),
     messages=[],
     offset=0,
@@ -520,7 +520,7 @@ conv_qwen2 = Conversation(
     version="qwen2",
 )
 conv_qwen2_5 = Conversation(
-    system="<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
+    system_message="<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
     roles=("<|im_start|>user", "<|im_start|>assistant"),
     messages=[],
     offset=0,
