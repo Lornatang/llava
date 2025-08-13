@@ -66,4 +66,4 @@ torchrun --nproc_per_node=${NPROC_PER_NODE} \
          --attn_implementation ${ATTN_IMPLEMENTATION} \
          --torch_compile True \
          --torch_compile_backend ${TORCH_COMPILE_BACKEND} \
-         --deepspeed ${DEEPSPEED_CONFIG} \
+         --deepspeed ${DEEPSPEED_CONFIG}

@@ -295,9 +295,9 @@ class TrainingArguments(transformers.TrainingArguments):
         metadata={"help": "How many bits to use."},
     )
     lora_enable: bool = False
-    lora_r: int = 64
-    lora_alpha: int = 16
-    lora_dropout: float = 0.05
+    lora_r: int = 4  # 4(0.5B)/8(1.5B)/16(3B)/32(7B)/64(13B)/128(32B)
+    lora_alpha: int = 16  # 2~4 * lora_r
+    lora_dropout: float = 0.05  # 0.05(large data)/0.1(medium data)/0.2(small data)
     lora_weight_path: str = ""
     lora_bias: str = "none"
     mm_projector_lr: Optional[float] = None
@@ -1243,7 +1243,8 @@ def train(attn_implementation: str = None) -> None:
     # Load tokenizer.
     if (
             "qwen1.5" in model_args.model_path.lower() or
-            "qwen2" in model_args.model_path.lower()
+            "qwen2" in model_args.model_path.lower() or
+            "qwen2.5" in model_args.model_path.lower()
     ):
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_args.model_path,
