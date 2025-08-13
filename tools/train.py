@@ -295,7 +295,7 @@ class TrainingArguments(transformers.TrainingArguments):
         metadata={"help": "How many bits to use."},
     )
     lora_enable: bool = False
-    lora_r: int = 4  # 4(0.5B)/8(1.5B)/16(3B)/32(7B)/64(13B)/128(32B)
+    lora_r: int = 4  # 4(0.5B)/8(1B)/16(3B)/32(7B)/64(8B)/128(13B)
     lora_alpha: int = 16  # 2~4 * lora_r
     lora_dropout: float = 0.05  # 0.05(large data)/0.1(medium data)/0.2(small data)
     lora_weight_path: str = ""

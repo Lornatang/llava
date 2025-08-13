@@ -16,19 +16,20 @@ MASTER_ADDR="127.0.0.1"
 MASTER_PORT=$(shuf -i 10000-19999 -n 1)
 
 # Data Configuration.
-DATA_PATH="./datasets/stage1_data.yaml"
-IMAGE_FOLDER="./datasets/llava_pretrain/images"
+DATA_PATH="./datasets/stage2_data.yaml"
+IMAGE_FOLDER="./datasets/llava_finetune"
 
 # Train Configuration.
-VERSION="llava_plain"
+VERSION="vicuna_v1"
 MODEL_PATH="./results/pretrained_models/lmsys/vicuna-13b-v1.5"
 VISION_MODEL_PATH="./results/pretrained_models/openai/clip-vit-large-patch14-336"
-RUN_NAME="llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-stage1_data-lora"
-ATTN_IMPLEMENTATION="flash_attention_2"  # "flash_attention_2" or "flash_attention_3" or "sdpa"
+PRETRAIN_MM_MLP_ADAPTER_PATH="./results/stage_1_pretrain/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-stage1_data/mm_projector.bin"
+RUN_NAME="llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-stage2_data-lora"
+ATTN_IMPLEMENTATION="sdpa"  # "flash_attention_2" or "flash_attention_3" or "sdpa"
 TORCH_COMPILE_BACKEND="inductor"  # "inductor" or "eager"
 DEEPSPEED_CONFIG="./tools/zero3.json"
 
-# LoRA training Hyperparameters.
+# Training Hyperparameters.
 torchrun --nproc_per_node=${NPROC_PER_NODE} \
          --master_addr=${MASTER_ADDR} \
          --master_port=${MASTER_PORT} \
@@ -38,31 +39,37 @@ torchrun --nproc_per_node=${NPROC_PER_NODE} \
          --data_path ${DATA_PATH} \
          --image_folder ${IMAGE_FOLDER} \
          --vision_tower ${VISION_MODEL_PATH} \
+         --pretrain_mm_mlp_adapter ${PRETRAIN_MM_MLP_ADAPTER_PATH} \
          --lora_enable True \
-         --lora_r 4 \
-         --lora_alpha 16 \
-         --mm_tunable_parts "mm_mlp_adapter" \
+         --lora_r 128 \
+         --lora_alpha 256 \
+         --mm_tunable_parts "mm_vision_tower,mm_mlp_adapter,mm_language_model" \
+         --mm_vision_tower_lr 2e-6 \
          --mm_vision_select_layer -2 \
          --mm_projector_type "mlp2x_gelu" \
          --mm_projector_lr 2e-5 \
          --mm_use_im_start_end False \
          --mm_use_im_patch_token False \
-         --output_dir "./results/stage1_pretrain/${RUN_NAME}" \
+         --mm_patch_merge_type "spatial_unpad" \
+         --image_aspect_ratio "anyres_max_9" \
+         --image_grid_pinpoints  "(1x1),...,(6x6)" \
+         --group_by_modality_length True \
+         --output_dir "./results/stage2_finetune/${RUN_NAME}" \
          --num_train_epochs 1 \
-         --per_device_train_batch_size 16 \
-         --gradient_accumulation_steps 1 \
+         --per_device_train_batch_size 1 \
+         --gradient_accumulation_steps 2 \
          --dataloader_drop_last True \
-         --learning_rate 1e-3 \
-         --lr_scheduler_type "cosine" \
-         --weight_decay 0. \
-         --warmup_ratio 0.03 \
          --save_strategy "steps" \
          --save_steps 1000 \
          --save_total_limit 1 \
+         --learning_rate 1e-5 \
+         --lr_scheduler_type "cosine" \
+         --weight_decay 0. \
+         --warmup_ratio 0.03 \
          --logging_steps 10 \
          --bf16 True \
          --tf32 True \
-         --model_max_length 8192 \
+         --model_max_length 32768 \
          --gradient_checkpointing True \
          --lazy_preprocess True \
          --report_to "wandb" \
