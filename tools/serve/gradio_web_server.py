@@ -535,8 +535,14 @@ def build_demo(embed_mode: bool) -> gr.Blocks:
             # Left column: model selection, image input, parameters.
             with gr.Column(scale=3):
                 with gr.Row(elem_id="model_selector_row"):
-                    model_selector = gr.Dropdown(choices=models, value=models[0] if len(models) > 0 else "", interactive=True, show_label=False,
-                                                 container=False)
+                    default_model = models[0] if models else None
+                    model_selector = gr.Dropdown(
+                        choices=models,
+                        value=default_model,
+                        interactive=True,
+                        show_label=False,
+                        container=False
+                    )
 
                 imagebox = gr.Image(type="pil")
                 image_process_mode = gr.Radio(["Crop", "Resize", "Pad", "Default"], value="Default", label="Preprocess for non-square image",
@@ -580,7 +586,12 @@ def build_demo(embed_mode: bool) -> gr.Blocks:
 
             # Right column: chatbot and buttons.
             with gr.Column(scale=8):
-                chatbot = gr.Chatbot(elem_id="chatbot", label="LLaVA Chatbot", height=550)
+                chatbot = gr.Chatbot(
+                    elem_id="chatbot",
+                    label="LLaVA Chatbot",
+                    height=550,
+                    type="messages"
+                )
                 with gr.Row():
                     with gr.Column(scale=8):
                         textbox.render()
