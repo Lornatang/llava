@@ -1,29 +1,251 @@
 # Copyright (c) AlphaBetter. All rights reserved.
 import argparse
-import datetime
 import hashlib
 import json
 import os
 import time
-from typing import Any
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Tuple
 
 import gradio as gr
 import requests
 
-from llava.constants import MODERATION_MSG, SERVER_ERROR_MSG
-from llava.conversation import SeparatorStyle, default_conversation, conv_templates
+from llava.constants import GET_QUERY_PARAMS_FROM_WINDOW, MODERATION_MSG, SERVER_ERROR_MSG
+from llava.conversation import default_conversation, conv_templates
 from llava.utils.events import LOGGER
 
-headers = {"User-Agent": "LLaVA Client"}
+HEADERS = {"User-Agent": "LLaVA Web Client"}
+TITLE_MARKDOWN = """
+# LLaVA: Large Language and Vision Assistant
+"""
 
-# no_change_btn = gr.Button.update()
-# enable_btn = gr.Button.update(interactive=True)
-# disable_btn = gr.Button.update(interactive=False)
+BLOCK_CSS = """
 
-priority = {
-    "vicuna-13b": "aaaaaaa",
-    "koala-13b": "aaaaaab",
+#buttons button {
+    min-width: min(120px,100%);
 }
+
+"""
+NO_CHANGE_BTN = gr.update()
+ENABLE_BTN = gr.update(interactive=True)
+DISABLE_BTN = gr.update(interactive=False)
+
+
+def add_text(
+        state: Any,
+        text: str,
+        image: Any,
+        image_process_mode: str,
+        request: gr.Request
+) -> Any:
+    """Add user text (and optionally image) to the conversation.
+
+    Handles moderation checks and updates the chatbot messages.
+
+    Args:
+        state (Any): Current conversation state.
+        text (str): User input text.
+        image (Any): Optional image input.
+        image_process_mode (str): Selected image preprocessing mode.
+        request (gr.Request): Gradio request object.
+
+    Returns:
+        Any: Tuple containing updated state, chatbot messages, message string, None, and 5 button states.
+    """
+    LOGGER.info(f"add_text. ip: {request.client.host}. len: {len(text)}")
+
+    if len(text) <= 0 and image is None:
+        state.skip_next = True
+        return (state, state.to_gradio_chatbot(), "", None) + (NO_CHANGE_BTN,) * 5
+
+    if args.moderate:
+        flagged = violates_moderation(text)
+        if flagged:
+            state.skip_next = True
+            return (state, state.to_gradio_chatbot(), MODERATION_MSG, None) + (NO_CHANGE_BTN,) * 5
+
+    text = text[:1536]
+    if image is not None:
+        text = text[:1200]
+        if "<image>" not in text:
+            text += "\n<image>"
+        text = (text, image, image_process_mode)
+        if len(state.get_images(return_pil=True)) > 0:
+            state = default_conversation.copy()
+
+    state.append_message(state.roles[0], text)
+    state.append_message(state.roles[1], None)
+    state.skip_next = False
+    return (state, state.to_gradio_chatbot(), "", None) + (DISABLE_BTN,) * 5
+
+
+def clear_history(request: gr.Request) -> Any:
+    """Clear the conversation history and reset state.
+
+    Args:
+        request (gr.Request): Gradio request object.
+
+    Returns:
+        Any: Tuple containing reset state, empty chatbot, empty string, None, and 5 disabled buttons.
+    """
+    LOGGER.info(f"clear_history. ip: {request.client.host}")
+    state = default_conversation.copy()
+    return (state, state.to_gradio_chatbot(), "", None) + (DISABLE_BTN,) * 5
+
+
+def downvote_last_response(state: Any, model_selector: str, request: gr.Request) -> Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    """Register a downvote for the last response.
+
+    Args:
+        state (Any): Current conversation state.
+        model_selector (str): Name of the model being voted on.
+        request (gr.Request): Gradio request object.
+
+    Returns:
+        Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Any]]: Tuple of output values for Gradio: empty string and 3 disabled buttons.
+    """
+    LOGGER.info(f"downvote. ip: {request.client.host}")
+    vote_last_response(state, "downvote", model_selector, request)
+    return ("",) + (DISABLE_BTN,) * 3
+
+
+def flag_last_response(state: Any, model_selector: str, request: gr.Request) -> Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    """Flag the last response for moderation.
+
+    Args:
+        state (Any): Current conversation state.
+        model_selector (str): Name of the model being voted on.
+        request (gr.Request): Gradio request object.
+
+    Returns:
+        Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Any]]: Tuple of output values for Gradio: empty string and 3 disabled buttons.
+    """
+    LOGGER.info(f"flag. ip: {request.client.host}")
+    vote_last_response(state, "flag", model_selector, request)
+    return ("",) + (DISABLE_BTN,) * 3
+
+
+def get_conv_log_file_path() -> Path:
+    """Generate a conversation log filename based on the current date.
+
+    Returns:
+        Path: log file path.
+    """
+    today = datetime.now()
+    filename = f"{today:%Y-%m-%d}-conv.json"
+    return Path(".", filename)
+
+
+def get_model_list() -> List[str]:
+    """Fetch the list of available models from the controller service.
+
+    This function first refreshes all worker states by calling the
+    controller's `/refresh_all_workers` endpoint, then retrieves the
+    current list of models from `/list_models` endpoint. The list is
+    sorted alphabetically before returning.
+
+    Returns:
+        List[str]: A sorted list of model names available from the controller.
+
+    Raises:
+        AssertionError: If the refresh request fails (status code != 200).
+        requests.RequestException: If the network request encounters an error.
+        KeyError: If the returned JSON does not contain the "models" key.
+    """
+    ret = requests.post(f"{args.controller_url}/refresh_all_workers")
+    assert ret.status_code == 200, "Failed to refresh all workers"
+
+    ret = requests.post(f"{args.controller_url}/list_models")
+    ret.raise_for_status()  # 提升异常处理，自动抛出 HTTPError
+    models = ret.json()["models"]
+
+    models.sort()
+    LOGGER.info(f"Models: {models}.")
+    return models
+
+
+def load_demo(url_params: Dict[str, str], request: gr.Request) -> Tuple[Any, Dict[str, Any]]:
+    """Initialize the conversation state and update the model dropdown based on URL parameters.
+
+    This function is typically used as the Gradio `load` callback to:
+    1. Log the client IP and URL parameters.
+    2. Initialize a new conversation state.
+    3. Optionally pre-select a model in the dropdown if specified in URL parameters.
+
+    Args:
+        url_params (Dict[str, str]): URL query parameters from the browser, e.g., {'model': 'vicuna-13b'}.
+        request (gr.Request): Gradio request object containing client information such as IP address.
+
+    Returns:
+        Tuple[Any, Dict[str, Any]]:
+            - `state`: A copy of the default conversation state.
+            - `dropdown_update`: Gradio Dropdown update object, optionally setting `value` and `visible`.
+    """
+    LOGGER.info(f"load_demo. ip: {request.client.host}. params: {url_params}.")
+
+    dropdown_update: Dict[str, Any] = {"visible": True}
+
+    model_name = url_params.get("model")
+    if model_name in models:
+        dropdown_update["value"] = model_name
+
+    state = default_conversation.copy()
+    return state, dropdown_update
+
+
+def load_demo_refresh_model_list(request: gr.Request) -> Tuple[Any, Dict[str, Any]]:
+    """Reload the model list from the controller and initialize conversation state.
+
+    Args:
+        request (gr.Request): Gradio request object containing client information.
+
+    Returns:
+        Tuple[Any, dict[str, Any]]:
+            - `state`: Initialized conversation state.
+            - `dropdown_update`: Dictionary to update the model dropdown choices and selected value.
+    """
+    LOGGER.info(f"load_demo_refresh_model_list. ip: {request.client.host}")
+    models = get_model_list()
+    state = default_conversation.copy()
+    dropdown_update = {"choices": models, "value": models[0] if len(models) > 0 else ""}
+    return state, dropdown_update
+
+
+def regenerate(state: Any, image_process_mode: str, request: gr.Request) -> Any:
+    """Regenerate the last assistant response.
+
+    Args:
+        state (Any): Current conversation state.
+        image_process_mode (str): Selected image preprocessing mode.
+        request (gr.Request): Gradio request object.
+
+    Returns:
+        Any: Tuple containing updated state, chatbot messages, empty string, None, and 5 disabled buttons.
+    """
+    LOGGER.info(f"regenerate. ip: {request.client.host}.")
+    state.messages[-1][-1] = None
+    prev_human_msg = state.messages[-2]
+    if isinstance(prev_human_msg[1], (tuple, list)):
+        prev_human_msg[1] = (*prev_human_msg[1][:2], image_process_mode)
+    state.skip_next = False
+    return (state, state.to_gradio_chatbot(), "", None) + (DISABLE_BTN,) * 5
+
+
+def upvote_last_response(state: Any, model_selector: str, request: gr.Request) -> Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    """Register an upvote for the last response.
+
+    Args:
+        state (Any): Current conversation state.
+        model_selector (str): Name of the model being voted on.
+        request (gr.Request): Gradio request object.
+
+    Returns:
+        Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Any]]: Tuple of output values for Gradio: empty string and 3 disabled buttons.
+    """
+    LOGGER.info(f"upvote. ip: {request.client.host}")
+    vote_last_response(state, "upvote", model_selector, request)
+    return ("",) + (DISABLE_BTN,) * 3
 
 
 def violates_moderation(text: str) -> bool:
@@ -65,182 +287,46 @@ def violates_moderation(text: str) -> bool:
     return flagged
 
 
-def get_conv_log_filename():
-    t = datetime.datetime.now()
-    name = os.path.join(".", f"{t.year}-{t.month:02d}-{t.day:02d}-conv.json")
-    return name
+def vote_last_response(state: Any, vote_type: str, model_selector: str, request: gr.Request) -> None:
+    """Record a vote for the last model response to a log file.
 
+    Args:
+        state (Any): The conversation state object, expected to have a `.dict()` method.
+        vote_type (str): Type of vote, e.g., "upvote" or "downvote".
+        model_selector (str): Name of the model being voted on.
+        request (gr.Request): Gradio request object containing client information.
+    """
+    log_file_path: Path = get_conv_log_file_path()
+    log_file_path.parent.mkdir(parents=True, exist_ok=True)
 
-def get_model_list():
-    ret = requests.post(args.controller_url + "/refresh_all_workers")
-    assert ret.status_code == 200
-    ret = requests.post(args.controller_url + "/list_models")
-    models = ret.json()["models"]
-    models.sort(key=lambda x: priority.get(x, x))
-    LOGGER.info(f"Models: {models}")
-    return models
-
-
-get_window_url_params = """
-function() {
-    const params = new URLSearchParams(window.location.search);
-    url_params = Object.fromEntries(params);
-    console.log(url_params);
-    return url_params;
+    data = {
+        "tstamp": round(time.time(), 4),
+        "type": vote_type,
+        "model": model_selector,
+        "state": state.dict(),
+        "ip": request.client.host,
     }
-"""
+
+    with log_file_path.open("a", encoding="utf-8") as file:
+        file.write(json.dumps(data) + "\n")
 
 
-def load_demo(url_params, request: gr.Request):
-    LOGGER.info(f"load_demo. ip: {request.client.host}. params: {url_params}")
-
-    dropdown_update = gr.Dropdown.update(visible=True)
-    if "model" in url_params:
-        model = url_params["model"]
-        if model in models:
-            dropdown_update = gr.Dropdown.update(value=model, visible=True)
-
-    state = default_conversation.copy()
-    return state, dropdown_update
-
-
-def load_demo_refresh_model_list(request: gr.Request):
-    LOGGER.info(f"load_demo. ip: {request.client.host}")
-    models = get_model_list()
-    state = default_conversation.copy()
-    dropdown_update = gr.Dropdown.update(choices=models, value=models[0] if len(models) > 0 else "")
-    return state, dropdown_update
-
-
-def vote_last_response(state, vote_type, model_selector, request: gr.Request):
-    with open(get_conv_log_filename(), "a") as fout:
-        data = {
-            "tstamp": round(time.time(), 4),
-            "type": vote_type,
-            "model": model_selector,
-            "state": state.dict(),
-            "ip": request.client.host,
-        }
-        fout.write(json.dumps(data) + "\n")
-
-
-def upvote_last_response(state, model_selector, request: gr.Request):
-    LOGGER.info(f"upvote. ip: {request.client.host}")
-    vote_last_response(state, "upvote", model_selector, request)
-    return ("",) + (disable_btn,) * 3
-
-
-def downvote_last_response(state, model_selector, request: gr.Request):
-    LOGGER.info(f"downvote. ip: {request.client.host}")
-    vote_last_response(state, "downvote", model_selector, request)
-    return ("",) + (disable_btn,) * 3
-
-
-def flag_last_response(state, model_selector, request: gr.Request):
-    LOGGER.info(f"flag. ip: {request.client.host}")
-    vote_last_response(state, "flag", model_selector, request)
-    return ("",) + (disable_btn,) * 3
-
-
-def regenerate(state, image_process_mode, request: gr.Request):
-    LOGGER.info(f"regenerate. ip: {request.client.host}")
-    state.messages[-1][-1] = None
-    prev_human_msg = state.messages[-2]
-    if type(prev_human_msg[1]) in (tuple, list):
-        prev_human_msg[1] = (*prev_human_msg[1][:2], image_process_mode)
-    state.skip_next = False
-    return (state, state.to_gradio_chatbot(), "", None) + (disable_btn,) * 5
-
-
-def clear_history(request: gr.Request):
-    LOGGER.info(f"clear_history. ip: {request.client.host}")
-    state = default_conversation.copy()
-    return (state, state.to_gradio_chatbot(), "", None) + (disable_btn,) * 5
-
-
-def add_text(state, text, image, image_process_mode, request: gr.Request):
-    LOGGER.info(f"add_text. ip: {request.client.host}. len: {len(text)}")
-    if len(text) <= 0 and image is None:
-        state.skip_next = True
-        return (state, state.to_gradio_chatbot(), "", None) + (no_change_btn,) * 5
-    if args.moderate:
-        flagged = violates_moderation(text)
-        if flagged:
-            state.skip_next = True
-            return (state, state.to_gradio_chatbot(), MODERATION_MSG, None) + (no_change_btn,) * 5
-
-    text = text[:1536]  # Hard cut-off
-    if image is not None:
-        text = text[:1200]  # Hard cut-off for images
-        if "<image>" not in text:
-            # text = '<Image><image></Image>' + text
-            text = text + "\n<image>"
-        text = (text, image, image_process_mode)
-        if len(state.get_images(return_pil=True)) > 0:
-            state = default_conversation.copy()
-    state.append_message(state.roles[0], text)
-    state.append_message(state.roles[1], None)
-    state.skip_next = False
-    return (state, state.to_gradio_chatbot(), "", None) + (disable_btn,) * 5
-
-
-def http_bot(state, model_selector, temperature, top_p, max_new_tokens, request: gr.Request, template_name=None):
-    LOGGER.info(f"http_bot. ip: {request.client.host}")
+def http_bot(state, model_selector, conv_mode, temperature, top_p, max_new_tokens, request: gr.Request):
+    LOGGER.info(f"http_bot. ip: {request.client.host}.")
     start_tstamp = time.time()
     model_name = model_selector
 
     if state.skip_next:
-        # This generate call is skipped due to invalid inputs
-        yield (state, state.to_gradio_chatbot()) + (no_change_btn,) * 5
+        yield (state, state.to_gradio_chatbot()) + (NO_CHANGE_BTN,) * 5
         return
 
     if len(state.messages) == state.offset + 2:
-        # First round of conversation
-        if "llava" in model_name.lower():
-            if "llama-2" in model_name.lower():
-                template_name = "llava_llama_2"
-            elif "mistral" in model_name.lower() or "mixtral" in model_name.lower():
-                if "orca" in model_name.lower():
-                    template_name = "mistral_orca"
-                elif "hermes" in model_name.lower():
-                    template_name = "mistral_direct"
-                else:
-                    template_name = "mistral_instruct"
-            elif "zephyr" in model_name.lower():
-                template_name = "mistral_zephyr"
-            elif "hermes" in model_name.lower():
-                template_name = "mistral_direct"
-            elif "v1" in model_name.lower():
-                if "mmtag" in model_name.lower():
-                    template_name = "llava_v1_mmtag"
-                elif "plain" in model_name.lower() and "finetune" not in model_name.lower():
-                    template_name = "llava_v1_mmtag"
-                else:
-                    template_name = "llava_v1"
-            elif "mpt" in model_name.lower():
-                template_name = "mpt"
-            else:
-                if "mmtag" in model_name.lower():
-                    template_name = "v0_plain"
-                elif "plain" in model_name.lower() and "finetune" not in model_name.lower():
-                    template_name = "v0_plain"
-                else:
-                    template_name = "llava_v0"
-        elif "mistral" in model_name.lower() or "mixtral" in model_name.lower():
-            if "orca" in model_name.lower():
-                template_name = "mistral_orca"
-            elif "hermes" in model_name.lower():
-                template_name = "mistral_direct"
-            else:
-                template_name = "mistral_instruct"
-        elif "hermes" in model_name.lower():
-            template_name = "mistral_direct"
-        elif "zephyr" in model_name.lower():
-            template_name = "mistral_zephyr"
-        elif "mpt" in model_name:
-            template_name = "mpt_text"
-        elif "llama-2" in model_name:
-            template_name = "llama_2"
+        if "qwen2.5" in model_name.lower():
+            template_name = "qwen2_5"
+        elif "qwen2" in model_name.lower():
+            template_name = "qwen2"
+        elif "qwen1.5" in model_name.lower():
+            template_name = "llava_llama_2"
         else:
             template_name = "vicuna_v1"
         new_state = conv_templates[template_name].copy()
@@ -257,7 +343,7 @@ def http_bot(state, model_selector, temperature, top_p, max_new_tokens, request:
     # No available worker
     if worker_addr == "":
         state.messages[-1][-1] = SERVER_ERROR_MSG
-        yield (state, state.to_gradio_chatbot(), disable_btn, disable_btn, disable_btn, enable_btn, enable_btn)
+        yield state, state.to_gradio_chatbot(), DISABLE_BTN, DISABLE_BTN, DISABLE_BTN, ENABLE_BTN, ENABLE_BTN
         return
 
     # Construct prompt
@@ -265,33 +351,30 @@ def http_bot(state, model_selector, temperature, top_p, max_new_tokens, request:
 
     all_images = state.get_images(return_pil=True)
     all_image_hash = [hashlib.md5(image.tobytes()).hexdigest() for image in all_images]
-    for image, hash in zip(all_images, all_image_hash):
-        t = datetime.datetime.now()
-        filename = os.path.join(".", "serve_images", f"{t.year}-{t.month:02d}-{t.day:02d}", f"{hash}.jpg")
+    for image, hash_str in zip(all_images, all_image_hash):
+        t = datetime.now()
+        filename = os.path.join(".", "serve_images", f"{t.year}-{t.month:02d}-{t.day:02d}", f"{hash_str}.jpg")
         if not os.path.isfile(filename):
             os.makedirs(os.path.dirname(filename), exist_ok=True)
             image.save(filename)
 
-    # Make requests
     pload = {
         "model": model_name,
         "prompt": prompt,
         "temperature": float(temperature),
         "top_p": float(top_p),
         "max_new_tokens": min(int(max_new_tokens), 1536),
-        "stop": state.sep if state.sep_style in [SeparatorStyle.SINGLE, SeparatorStyle.MPT] else state.sep2,
+        "stop": state.sep2,
         "images": f"List of {len(state.get_images())} images: {all_image_hash}",
     }
     LOGGER.info(f"==== request ====\n{pload}")
 
     pload["images"] = state.get_images()
-
     state.messages[-1][-1] = "▌"
-    yield (state, state.to_gradio_chatbot()) + (disable_btn,) * 5
+    yield (state, state.to_gradio_chatbot()) + (DISABLE_BTN,) * 5
 
     try:
-        # Stream output
-        response = requests.post(worker_addr + "/worker_generate_stream", headers=headers, json=pload, stream=True, timeout=100)
+        response = requests.post(worker_addr + "/worker_generate_stream", headers=HEADERS, json=pload, stream=True, timeout=100)
         last_print_time = time.time()
         for chunk in response.iter_lines(decode_unicode=False, delimiter=b"\0"):
             if chunk:
@@ -301,72 +384,49 @@ def http_bot(state, model_selector, temperature, top_p, max_new_tokens, request:
                     state.messages[-1][-1] = output + "▌"
                     if time.time() - last_print_time > 0.05:
                         last_print_time = time.time()
-                        yield (state, state.to_gradio_chatbot()) + (disable_btn,) * 5
+                        yield (state, state.to_gradio_chatbot()) + (DISABLE_BTN,) * 5
                 else:
                     output = data["text"] + f" (error_code: {data['error_code']})"
                     state.messages[-1][-1] = output
-                    yield (state, state.to_gradio_chatbot()) + (disable_btn, disable_btn, disable_btn, enable_btn, enable_btn)
+                    yield (state, state.to_gradio_chatbot()) + (DISABLE_BTN, DISABLE_BTN, DISABLE_BTN, ENABLE_BTN, ENABLE_BTN)
                     return
                 time.sleep(0.03)
     except requests.exceptions.RequestException as e:
         state.messages[-1][-1] = SERVER_ERROR_MSG
-        yield (state, state.to_gradio_chatbot()) + (disable_btn, disable_btn, disable_btn, enable_btn, enable_btn)
+        yield (state, state.to_gradio_chatbot()) + (DISABLE_BTN, DISABLE_BTN, DISABLE_BTN, ENABLE_BTN, ENABLE_BTN)
         return
 
     state.messages[-1][-1] = state.messages[-1][-1][:-1]
-    yield (state, state.to_gradio_chatbot()) + (enable_btn,) * 5
+    yield (state, state.to_gradio_chatbot()) + (ENABLE_BTN,) * 5
 
     finish_tstamp = time.time()
     LOGGER.info(f"{output}")
 
-    with open(get_conv_log_filename(), "a") as fout:
-        data = {
-            "tstamp": round(finish_tstamp, 4),
-            "type": "chat",
-            "model": model_name,
-            "start": round(start_tstamp, 4),
-            "finish": round(start_tstamp, 4),
-            "state": state.dict(),
-            "images": all_image_hash,
-            "ip": request.client.host,
-        }
-        fout.write(json.dumps(data) + "\n")
+    log_file_path: Path = get_conv_log_file_path()
+    log_file_path.parent.mkdir(parents=True, exist_ok=True)
 
+    data = {
+        "tstamp": round(finish_tstamp, 4),
+        "type": "chat",
+        "model": model_name,
+        "start": round(start_tstamp, 4),
+        "finish": round(start_tstamp, 4),
+        "state": state.dict(),
+        "images": all_image_hash,
+        "ip": request.client.host,
+    }
 
-title_markdown = """
-# 🌋 LLaVA: Large Language and Vision Assistant
-[[Project Page](https://llava-vl.github.io)] [[Code](https://github.com/haotian-liu/LLaVA)] [[Model](https://github.com/haotian-liu/LLaVA/blob/main/docs/MODEL_ZOO.md)] | 📚 [[LLaVA](https://arxiv.org/abs/2304.08485)] [[LLaVA-v1.5](https://arxiv.org/abs/2310.03744)]
-"""
-
-tos_markdown = """
-### Terms of use
-By using this service, users are required to agree to the following terms:
-The service is a research preview intended for non-commercial use only. It only provides limited safety measures and may generate offensive content. It must not be used for any illegal, harmful, violent, racist, or sexual purposes. The service may collect user dialogue data for future research.
-Please click the "Flag" button if you get any inappropriate answer! We will collect those to keep improving our moderator.
-For an optimal experience, please use desktop computers for this demo, as mobile devices may compromise its quality.
-"""
-
-learn_more_markdown = """
-### License
-The service is a research preview intended for non-commercial use only, subject to the model [License](https://github.com/facebookresearch/llama/blob/main/MODEL_CARD.md) of LLaMA, [Terms of Use](https://openai.com/policies/terms-of-use) of the data generated by OpenAI, and [Privacy Practices](https://chrome.google.com/webstore/detail/sharegpt-share-your-chatg/daiacboceoaocpibfodeljbdfacokfjb) of ShareGPT. Please contact us if you find any potential violation.
-"""
-
-block_css = """
-
-#buttons button {
-    min-width: min(120px,100%);
-}
-
-"""
+    with log_file_path.open("a", encoding="utf-8") as file:
+        file.write(json.dumps(data) + "\n")
 
 
 def build_demo(embed_mode):
     textbox = gr.Textbox(show_label=False, placeholder="Enter text and press ENTER", container=False)
-    with gr.Blocks(title="LLaVA", theme=gr.themes.Default(), css=block_css) as demo:
+    with gr.Blocks(title="LLaVA", theme=gr.themes.Default(), css=BLOCK_CSS) as demo:
         state = gr.State()
 
         if not embed_mode:
-            gr.Markdown(title_markdown)
+            gr.Markdown(TITLE_MARKDOWN)
 
         with gr.Row():
             with gr.Column(scale=3):
@@ -421,16 +481,12 @@ def build_demo(embed_mode):
                     with gr.Column(scale=1, min_width=50):
                         submit_btn = gr.Button(value="Send", variant="primary")
                 with gr.Row(elem_id="buttons") as button_row:
-                    upvote_btn = gr.Button(value="👍  Upvote", interactive=False)
-                    downvote_btn = gr.Button(value="👎  Downvote", interactive=False)
-                    flag_btn = gr.Button(value="⚠️  Flag", interactive=False)
-                    # stop_btn = gr.Button(value="⏹️  Stop Generation", interactive=False)
-                    regenerate_btn = gr.Button(value="🔄  Regenerate", interactive=False)
-                    clear_btn = gr.Button(value="🗑️  Clear", interactive=False)
+                    upvote_btn = gr.Button(value="Upvote", interactive=False)
+                    downvote_btn = gr.Button(value="Downvote", interactive=False)
+                    flag_btn = gr.Button(value="Flag", interactive=False)
+                    regenerate_btn = gr.Button(value="Regenerate", interactive=False)
+                    clear_btn = gr.Button(value="Clear", interactive=False)
 
-        if not embed_mode:
-            gr.Markdown(tos_markdown)
-            gr.Markdown(learn_more_markdown)
         url_params = gr.JSON(visible=False)
 
         # Register listeners
@@ -459,7 +515,7 @@ def build_demo(embed_mode):
         )
 
         if args.model_list_mode == "once":
-            demo.load(load_demo, [url_params], [state, model_selector], js=get_window_url_params, queue=False)
+            demo.load(load_demo, [url_params], [state, model_selector], js=GET_QUERY_PARAMS_FROM_WINDOW, queue=False)
         elif args.model_list_mode == "reload":
             demo.load(load_demo_refresh_model_list, None, [state, model_selector], queue=False)
         else:
