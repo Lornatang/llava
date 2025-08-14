@@ -16,8 +16,9 @@ from typing import Any, Dict, Optional, Tuple
 
 import torch
 import transformers
-from transformers import AutoTokenizer, BitsAndBytesConfig
 from peft import PeftModel
+from torch import nn
+from transformers import AutoTokenizer, BitsAndBytesConfig
 
 from llava.constants import DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.models.llm import LlavaLlamaConfig, LlavaLlamaForCausalLM, LlavaQwen2Config, LlavaQwen2ForCausalLM
@@ -78,8 +79,6 @@ def load_pretrained(
         kwargs["config"] = customized_config
 
     if "lora" in model_path.lower():
-        lora_cfg_pretrained = AutoConfig.from_pretrained(model_path)
-        tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=False)
         LOGGER.info("Loading LLaVA from base model...")
         if (
                 "qwen1.5" in model_path.lower() or
@@ -87,9 +86,9 @@ def load_pretrained(
                 "qwen2.5" in model_path.lower()
         ):
             lora_cfg_pretrained = LlavaQwen2Config.from_pretrained(model_path)
-            tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=False)
+            tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
             model = LlavaQwen2ForCausalLM.from_pretrained(
-                model_base,
+                model_path,
                 low_cpu_mem_usage=True,
                 config=lora_cfg_pretrained,
                 attn_implementation=attn_implementation,
@@ -97,9 +96,9 @@ def load_pretrained(
             )
         else:
             lora_cfg_pretrained = LlavaLlamaConfig.from_pretrained(model_path)
-            tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=False)
+            tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
             model = LlavaLlamaForCausalLM.from_pretrained(
-                model_base,
+                model_path,
                 low_cpu_mem_usage=True,
                 config=lora_cfg_pretrained,
                 attn_implementation=attn_implementation,
@@ -107,8 +106,8 @@ def load_pretrained(
             )
         token_num, tokem_dim = model.lm_head.out_features, model.lm_head.in_features
         if model.lm_head.weight.shape[0] != token_num:
-            model.lm_head.weight = torch.nn.Parameter(torch.empty(token_num, tokem_dim, device=model.device, dtype=model.dtype))
-            model.model.embed_tokens.weight = torch.nn.Parameter(torch.empty(token_num, tokem_dim, device=model.device, dtype=model.dtype))
+            model.lm_head.weight = nn.Parameter(torch.empty(token_num, tokem_dim, device=model.device, dtype=model.dtype))
+            model.model.embed_tokens.weight = nn.Parameter(torch.empty(token_num, tokem_dim, device=model.device, dtype=model.dtype))
 
         LOGGER.info("Loading additional LLaVA weights...")
         non_lora_trainables_path = Path(model_path, "non_lora_trainables.bin")
