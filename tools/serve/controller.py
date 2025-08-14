@@ -109,8 +109,13 @@ class Controller:
         if not worker_status:
             return False
 
-        self.worker_info[worker_name] = WorkerInfo(worker_status["model_names"], worker_status["speed"], worker_status["queue_length"],
-                                                   check_heart_beat, time.time())
+        self.worker_info[worker_name] = WorkerInfo(
+            model_names=worker_status["model_names"],
+            speed=worker_status["speed"],
+            queue_length=worker_status["queue_length"],
+            check_heart_beat=check_heart_beat,
+            last_heart_beat=str(time.time()),
+        )
 
         LOGGER.info(f"Register done: {worker_name}, {worker_status}")
         return True
@@ -141,10 +146,8 @@ class Controller:
 
     def list_models(self):
         model_names = set()
-
         for w_name, w_info in self.worker_info.items():
             model_names.update(w_info.model_names)
-
         return list(model_names)
 
     def get_worker_address(self, model_name: str):
@@ -241,8 +244,6 @@ class Controller:
             }
             yield json.dumps(ret).encode() + b"\0"
 
-    # Let the controller act as a worker to achieve hierarchical
-    # management. This can be used to connect isolated sub networks.
     def worker_api_get_status(self):
         model_names = set()
         speed = 0
