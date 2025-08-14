@@ -32,6 +32,30 @@ from llava.utils.events import LOGGER
 CONTROLLER_HEART_BEAT_EXPIRATION = 30
 
 
+def get_opts() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--host",
+        default="0.0.0.0",
+        type=str,
+        help="Host to listen on. Defaults to ``0.0.0.0``.",
+    )
+    parser.add_argument(
+        "--port",
+        default=10000,
+        type=int,
+        help="Port to listen on. Defaults to 10000.",
+    )
+    parser.add_argument(
+        "--dispatch-method",
+        default="shortest_queue",
+        type=str,
+        choices=["lottery", "shortest_queue"],
+        help="Method to dispatch requests to workers. Defaults to ``shortest_queue``.",
+    )
+    return parser.parse_args()
+
+
 class DispatchMethod(Enum):
     """Specifies the dispatch method for assigning tasks to workers.
 
@@ -353,30 +377,6 @@ def heart_beat_controller(controller: Any):
     while True:
         time.sleep(CONTROLLER_HEART_BEAT_EXPIRATION)
         controller.remove_stable_workers_by_expiration()
-
-
-def get_opts() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--host",
-        default="0.0.0.0",
-        type=str,
-        help="Host to listen on. Defaults to ``0.0.0.0``.",
-    )
-    parser.add_argument(
-        "--port",
-        default=10000,
-        type=int,
-        help="Port to listen on. Defaults to 10000.",
-    )
-    parser.add_argument(
-        "--dispatch-method",
-        default="shortest_queue",
-        type=str,
-        choices=["lottery", "shortest_queue"],
-        help="Method to dispatch requests to workers. Defaults to ``shortest_queue``.",
-    )
-    return parser.parse_args()
 
 
 app = FastAPI()
