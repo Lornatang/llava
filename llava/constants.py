@@ -20,3 +20,4 @@ DEFAULT_IM_END_TOKEN = "<im_end>"
 IMAGE_PLACEHOLDER = "<image-placeholder>"
 
 SERVER_ERROR_MSG = "**NETWORK ERROR DUE TO HIGH TRAFFIC. PLEASE REGENERATE OR REFRESH THIS PAGE.**"
+MODERATION_MSG = "I am sorry. Your input may violate our content moderation guidelines. Please avoid using harmful or offensive content."
