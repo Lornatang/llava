@@ -427,10 +427,12 @@ def http_bot(
     all_image_hash = [hashlib.md5(image.tobytes()).hexdigest() for image in all_images]
     for image, hash_str in zip(all_images, all_image_hash):
         t = datetime.now()
-        filename = os.path.join(".", "serve_images", f"{t.year}-{t.month:02d}-{t.day:02d}", f"{hash_str}.jpg")
-        if not os.path.isfile(filename):
-            os.makedirs(os.path.dirname(filename), exist_ok=True)
-            image.save(filename)
+        save_dir = Path("results", "serve_images", f"{t.year}-{t.month:02d}-{t.day:02d}")
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        file_path = Path(save_dir, f"{hash_str}.jpg")
+        if not file_path.is_file():
+            image.save(file_path)
 
     # Prepare payload.
     pload = {
@@ -539,20 +541,24 @@ def build_demo(embed_mode: bool) -> gr.Blocks:
                     model_selector = gr.Dropdown(
                         choices=models,
                         value=default_model,
+                        allow_custom_value=True,
                         interactive=True,
                         show_label=False,
-                        container=False
+                        container=False,
                     )
 
                 imagebox = gr.Image(type="pil")
-                image_process_mode = gr.Radio(["Crop", "Resize", "Pad", "Default"], value="Default", label="Preprocess for non-square image",
-                                              visible=False)
+                image_process_mode = gr.Radio(
+                    ["Crop", "Resize", "Pad", "Default"],
+                    value="Default",
+                    label="Preprocess for non-square image",
+                    visible=False,
+                )
 
-                cur_dir = os.path.dirname(os.path.abspath(__file__))
                 gr.Examples(
                     examples=[
-                        [f"{cur_dir}/examples/0.jpg", "What's in this image?"],
-                        [f"{cur_dir}/examples/1.jpg", "What are the things I should be cautious about when I visit here?"],
+                        [f"./assets/0.jpg", "What's in this image?"],
+                        [f"./assets/1.jpg", "What are the things I should be cautious about when I visit here?"],
                     ],
                     inputs=[imagebox, textbox],
                 )
