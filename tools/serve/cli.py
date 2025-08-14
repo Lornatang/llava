@@ -81,8 +81,9 @@ def cli(
 
     tokenizer, model, image_processor, _ = load_pretrained(model_path, load_8bit, load_4bit)
 
+    device = next(model.parameters()).device
     image = load_image(image_path)
-    image_tensor = image_processor.preprocess(image, return_tensors="pt")["pixel_values"].half().cuda()
+    image_tensor = image_processor.preprocess(image, return_tensors="pt")["pixel_values"].half().to(device)
 
     conv = conv_templates[conv_mode].copy()
     while True:
@@ -107,8 +108,8 @@ def cli(
         conv.append_message(conv.roles[1], None)
         prompt = conv.get_prompt()
 
-        input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt").unsqueeze(0).cuda()
-        attention_mask = (input_ids != tokenizer.pad_token_id).long()
+        input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt").unsqueeze(0).to(device)
+        attention_mask = (input_ids != tokenizer.pad_token_id).long().to(device)
         stop_str = conv.sep if conv.sep_style != SeparatorStyle.VICUNA_V1 else conv.sep2
         keywords = [stop_str]
         stopping_criteria = KeywordsStoppingCriteria(keywords, tokenizer, input_ids)
@@ -126,7 +127,7 @@ def cli(
                 stopping_criteria=[stopping_criteria],
             )
 
-        outputs = tokenizer.decode(output_ids[0, input_ids.shape[1]:]).strip()
+        outputs = tokenizer.decode(output_ids[0]).strip()
         conv.messages[-1][-1] = outputs
 
 
