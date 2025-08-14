@@ -292,7 +292,7 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=40000)
     parser.add_argument("--worker-address", type=str, default="http://127.0.0.1:40000")
     parser.add_argument("--controller-address", type=str, default="http://127.0.0.1:10000")
-    parser.add_argument("--model-path", type=str, default="facebook/opt-350m")
+    parser.add_argument("--model-path", type=str, default="./results/stage2_finetune_ov/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-stage2_ov_data")
     parser.add_argument("--limit-model-concurrency", type=int, default=5)
     parser.add_argument("--stream-interval", type=int, default=1)
     parser.add_argument("--no-register", action="store_true")
