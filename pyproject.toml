@@ -37,6 +37,7 @@ dependencies = [
     "decord",
     "deepspeed",
     "einops_exts",
+    "fastapi",
     "flash-attn>2.8.0",
     "numpy>=2.0.0",
     "peft",
@@ -47,6 +48,7 @@ dependencies = [
     "torchvision>=0.22.1",
     "tokenizers",
     "transformers",
+    "uvicorn",
     "wandb",
 ]
 
