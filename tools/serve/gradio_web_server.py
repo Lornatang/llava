@@ -220,7 +220,7 @@ def get_model_list() -> List[str]:
     assert ret.status_code == 200, "Failed to refresh all workers"
 
     ret = requests.post(f"{opts.controller_url}/list_models")
-    ret.raise_for_status()  # 提升异常处理，自动抛出 HTTPError
+    ret.raise_for_status()
     models = ret.json()["models"]
 
     models.sort()
