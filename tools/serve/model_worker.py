@@ -34,8 +34,8 @@ from llava.utils.checkpoint import load_pretrained
 from llava.utils.events import LOGGER
 from llava.utils.ops import KeywordsStoppingCriteria, load_image_from_base64, process_images, pretty_print_semaphore, tokenizer_image_token
 
-GLOBAL_COUNTER = 0
-MODEL_SEMAPHORE = None
+global_counter = 0
+model_semaphore = None
 
 
 def get_opts() -> argparse.Namespace:
@@ -152,7 +152,7 @@ class ModelWorker:
         Sends a POST request to the controller's `/register_worker` endpoint,
         including the worker's status and name.
         """
-        LOGGER.info("Register to controller")
+        LOGGER.info("Register to controller.")
         url = self.controller_addr + "/register_worker"
         data = {
             "worker_name": self.worker_addr,
@@ -174,8 +174,8 @@ class ModelWorker:
         """
         LOGGER.info(
             f"Send heart beat. Models: {[self.model_path]}. "
-            f"Semaphore: {pretty_print_semaphore(MODEL_SEMAPHORE)}. "
-            f"global_counter: {GLOBAL_COUNTER}."
+            f"Semaphore: {pretty_print_semaphore(model_semaphore)}. "
+            f"global_counter: {global_counter}."
         )
 
         url = self.controller_addr + "/receive_heart_beat"
@@ -204,13 +204,11 @@ class ModelWorker:
             int: The total number of requests waiting to be processed, including
             currently active ones.
         """
-        if MODEL_SEMAPHORE is None:
+        if model_semaphore is None:
             return 0
-        return (
-                opts.limit_model_concurrency
-                - MODEL_SEMAPHORE._value
-                + (len(MODEL_SEMAPHORE._waiters) if MODEL_SEMAPHORE._waiters is not None else 0)
-        )
+        else:
+            return opts.limit_model_concurrency - model_semaphore._value + (
+                len(model_semaphore._waiters) if model_semaphore._waiters is not None else 0)
 
     def get_status(self) -> Dict[str, Any]:
         """Retrieves the current status of the worker.
@@ -226,19 +224,13 @@ class ModelWorker:
         }
 
     @torch.inference_mode()
-    def generate_stream(self, params: Dict[str, Any]) -> Generator[bytes, None, None]:
+    def generate_stream(self, params: Any) -> Generator[bytes, None, None]:
         """Generates text from a given prompt in a streaming fashion.
 
         Handles both text-only prompts and prompts that include images.
 
         Args:
-            params (Dict[str, Any]): Inference parameters including:
-                - prompt (str): The text prompt, possibly with image tokens.
-                - images (Optional[List[str]]): Base64-encoded images.
-                - temperature (float): Sampling temperature.
-                - top_p (float): Nucleus sampling probability.
-                - max_new_tokens (int): Maximum number of new tokens to generate.
-                - stop (Optional[str]): Stop string.
+            params (Any): Inference parameters.
 
         Yields:
             bytes: JSON-encoded partial output messages, terminated by b"\\0".
@@ -395,7 +387,7 @@ def release_model_semaphore(fn: Optional[Callable[[], None]] = None) -> None:
         fn (Optional[Callable[[], None]]): A callback function to be called
             after releasing the semaphore. Defaults to None.
     """
-    MODEL_SEMAPHORE.release()
+    model_semaphore.release()
     if fn is not None:
         fn()
 
@@ -418,14 +410,14 @@ async def generate_stream(request: Request) -> StreamingResponse:
     Returns:
         StreamingResponse: A streaming response yielding generation outputs.
     """
-    global MODEL_SEMAPHORE, GLOBAL_COUNTER
-    GLOBAL_COUNTER += 1
+    global model_semaphore, global_counter
+    global_counter += 1
     params = await request.json()
 
-    if MODEL_SEMAPHORE is None:
-        MODEL_SEMAPHORE = asyncio.Semaphore(opts.limit_model_concurrency)
+    if model_semaphore is None:
+        model_semaphore = asyncio.Semaphore(opts.limit_model_concurrency)
 
-    await MODEL_SEMAPHORE.acquire()
+    await model_semaphore.acquire()
     worker.send_heart_beat()
 
     generator = worker.generate_stream_gate(params)
