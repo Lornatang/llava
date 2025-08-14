@@ -39,6 +39,7 @@ dependencies = [
     "einops_exts",
     "fastapi",
     "flash-attn>2.8.0",
+    "gradio",
     "numpy>=2.0.0",
     "peft",
     "pillow",
