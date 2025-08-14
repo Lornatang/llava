@@ -18,7 +18,7 @@ import json
 import threading
 import time
 from enum import Enum
-from typing import Any, List
+from typing import Any, Dict, List
 
 import numpy as np
 import requests
@@ -141,12 +141,8 @@ class Controller:
 
     def list_models(self):
         model_names = set()
-
         for w_name, w_info in self.worker_info.items():
             model_names.update(w_info.model_names)
-
-        print(list(model_names))
-
         return list(model_names)
 
     def get_worker_address(self, model_name: str):
@@ -167,7 +163,6 @@ class Controller:
                 worker_name = worker_names[pt]
                 return worker_name
 
-            # Check status before returning
             while True:
                 pt = np.random.choice(np.arange(len(worker_names)), p=worker_speeds)
                 worker_name = worker_names[pt]
@@ -243,8 +238,6 @@ class Controller:
             }
             yield json.dumps(ret).encode() + b"\0"
 
-    # Let the controller act as a worker to achieve hierarchical
-    # management. This can be used to connect isolated sub networks.
     def worker_api_get_status(self):
         model_names = set()
         speed = 0
@@ -283,44 +276,88 @@ app = FastAPI()
 
 @app.post("/register_worker")
 async def register_worker(request: Request):
-    data = await request.json()
+    """Registers a new worker with the controller.
+
+    Args:
+        request (Request): The FastAPI Request object containing worker registration data.
+            The JSON body is expected to contain "worker_name", "check_heart_beat" and an optional "worker_status".
+    """
+    data: Dict[str, Any] = await request.json()
     controller.register_worker(data["worker_name"], data["check_heart_beat"], data.get("worker_status", None))
 
 
 @app.post("/refresh_all_workers")
-async def refresh_all_workers():
-    models = controller.refresh_all_workers()
+async def refresh_all_workers() -> None:
+    """Refreshes the status of all workers registered with the controller."""
+    controller.refresh_all_workers()
 
 
 @app.post("/list_models")
-async def list_models():
-    models = controller.list_models()
+async def list_models() -> Dict[str, List[str]]:
+    """Retrieves a list of all models available from the workers.
+
+    Returns:
+        Dict[str, List[str]]: A dictionary containing a list of model names.
+    """
+    models: List[str] = controller.list_models()
     return {"models": models}
 
 
 @app.post("/get_worker_address")
-async def get_worker_address(request: Request):
-    data = await request.json()
-    addr = controller.get_worker_address(data["model"])
+async def get_worker_address(request: Request) -> Dict[str, str]:
+    """Gets the address of a worker serving a specific model.
+
+    Args:
+        request (Request): The FastAPI Request object. The JSON body is expected to contain the "model" name.
+
+    Returns:
+        Dict[str, str]: A dictionary containing the worker's address.
+    """
+    data: Dict[str, str] = await request.json()
+    addr: str = controller.get_worker_address(data["model"])
     return {"address": addr}
 
 
 @app.post("/receive_heart_beat")
-async def receive_heart_beat(request: Request):
-    data = await request.json()
-    exist = controller.receive_heart_beat(data["worker_name"], data["queue_length"])
+async def receive_heart_beat(request: Request) -> Dict[str, bool]:
+    """Receives a heartbeat from a worker and updates its status.
+
+    Args:
+        request (Request): The FastAPI Request object. The JSON body is expected to contain the "worker_name" and "queue_length".
+
+    Returns:
+        Dict[str, bool]: A dictionary with a boolean value indicating if the worker still exists.
+    """
+    data: Dict[str, Any] = await request.json()
+    exist: bool = controller.receive_heart_beat(data["worker_name"], data["queue_length"])
     return {"exist": exist}
 
 
 @app.post("/worker_generate_stream")
-async def worker_api_generate_stream(request: Request):
-    params = await request.json()
+async def worker_api_generate_stream(request: Request) -> StreamingResponse:
+    """Initiates a streaming text generation from a worker.
+
+    Args:
+        request (Request): The FastAPI Request object containing generation parameters in its JSON body.
+
+    Returns:
+        StreamingResponse: A StreamingResponse object that yields generated text chunks.
+    """
+    params: Dict[str, Any] = await request.json()
     generator = controller.worker_api_generate_stream(params)
     return StreamingResponse(generator)
 
 
 @app.post("/worker_get_status")
-async def worker_api_get_status(request: Request):
+async def worker_api_get_status(request: Request) -> Any:
+    """Retrieves the status of the workers.
+
+    Args:
+        request (Request): The FastAPI Request object.
+
+    Returns:
+        Any: A dictionary or other data structure containing the status of the workers.
+    """
     return controller.worker_api_get_status()
 
 
