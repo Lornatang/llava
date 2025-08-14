@@ -36,9 +36,9 @@ def get_opts() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--host",
-        default="0.0.0.0",
+        default="127.0.0.1",
         type=str,
-        help="Host to listen on. Defaults to ``0.0.0.0``.",
+        help="Host to listen on. Defaults to ``127.0.0.1``.",
     )
     parser.add_argument(
         "--port",

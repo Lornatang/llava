@@ -49,8 +49,8 @@ def get_opts() -> argparse.Namespace:
     parser.add_argument(
         "--host",
         type=str,
-        default="0.0.0.0",
-        help="Host to listen on. Defaults to ``0.0.0.0``."
+        default="127.0.0.1",
+        help="Host to listen on. Defaults to ``127.0.0.1``."
     )
     parser.add_argument(
         "--port",
@@ -454,7 +454,7 @@ def http_bot(
         "top_p": float(top_p),
         "max_new_tokens": min(int(max_new_tokens), 1536),
         "stop": state.sep2,
-        "images": f"List of {len(state.get_images())} images: {all_image_hash}",
+        "images": f"List of {len(state.get_images())} images: {all_image_hash}.",
     }
     LOGGER.info(f"==== request ====\n{pload}")
     pload["images"] = state.get_images()
@@ -493,7 +493,6 @@ def http_bot(
 
     # Log conversation.
     finish_tstamp = time.time()
-    LOGGER.info(f"{output}")
     log_file_path = get_conv_log_file_path()
     log_file_path.parent.mkdir(parents=True, exist_ok=True)
     data = {
