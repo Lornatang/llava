@@ -18,7 +18,7 @@ import json
 import threading
 import time
 from enum import Enum
-from typing import Any, List
+from typing import Any, Dict, List, Union
 
 import numpy as np
 import requests
@@ -88,45 +88,89 @@ class WorkerInfo:
 
 
 class Controller:
-    def __init__(self, dispatch_method: str):
-        # Dict[str -> WorkerInfo]
+    """The central component that manages workers and dispatches tasks.
+
+    This class handles the registration of workers, monitors their status
+    via heartbeats, and determines the best worker for a given task based on
+    the chosen dispatch method.
+    """
+
+    def __init__(self, dispatch_method: str) -> None:
+        """Initializes the controller with a dispatch method.
+
+        Args:
+            dispatch_method (str): The name of the dispatch method to use (e.g., "lottery", "shortest_queue").
+        """
         self.worker_info = {}
         self.dispatch_method = DispatchMethod.from_str(dispatch_method)
-
         self.heart_beat_thread = threading.Thread(target=heart_beat_controller, args=(self,))
         self.heart_beat_thread.start()
 
-        LOGGER.info("Init controller")
+    def register_worker(self, worker_name: str, check_heart_beat: bool, worker_status: Dict):
+        """Register a worker with the controller.
 
-    def register_worker(self, worker_name: str, check_heart_beat: bool, worker_status: dict):
+        This method registers a new worker or updates an existing worker's information,
+        including model names, speed, queue length, and heartbeat settings. If the worker
+        is new, it logs as a new worker, otherwise as an existing worker.
+
+        Args:
+            worker_name (str): The unique identifier for the worker to be registered.
+            check_heart_beat (bool): Flag indicating whether to monitor the worker's heartbeat.
+            worker_status (Dict): Dictionary containing worker status information including:
+                - model_names: List of model names the worker can serve
+                - speed: Processing speed of the worker
+                - queue_length: Current length of the worker's task queue
+
+        Returns:
+            bool: True if registration is successful, False otherwise.
+        """
         if worker_name not in self.worker_info:
             LOGGER.info(f"Register a new worker: {worker_name}")
         else:
             LOGGER.info(f"Register an existing worker: {worker_name}")
 
+        # Get worker status if not provided.
         if not worker_status:
             worker_status = self.get_worker_status(worker_name)
         if not worker_status:
             return False
 
-        self.worker_info[worker_name] = WorkerInfo(worker_status["model_names"], worker_status["speed"], worker_status["queue_length"],
-                                                   check_heart_beat, time.time())
+        # Store worker information.
+        self.worker_info[worker_name] = WorkerInfo(
+            model_names=worker_status["model_names"],
+            speed=worker_status["speed"],
+            queue_length=worker_status["queue_length"],
+            check_heart_beat=check_heart_beat,
+            last_heart_beat=str(time.time()),
+        )
 
         LOGGER.info(f"Register done: {worker_name}, {worker_status}")
         return True
 
-    def get_worker_status(self, worker_name: str):
+    @staticmethod
+    def get_worker_status(worker_name: str) -> Union[Dict, None]:
+        """Retrieve the status of a worker by making an HTTP request to the worker.
+
+        This method sends a POST request to the worker's "/worker_get_status" endpoint
+        to get information about the worker including model names, speed, and queue length.
+        
+        Args:
+            worker_name (str): The name/address of the worker whose status is to be retrieved.
+            
+        Returns:
+            Union[Dict, None]: A dictionary containing the worker's status information if successful, None if the request fails or returns a non-200 status code.
+        """
         try:
-            r = requests.post(worker_name + "/worker_get_status", timeout=5)
+            result = requests.post(worker_name + "/worker_get_status", timeout=5)
         except requests.exceptions.RequestException as e:
             LOGGER.error(f"Get status fails: {worker_name}, {e}")
             return None
 
-        if r.status_code != 200:
-            LOGGER.error(f"Get status fails: {worker_name}, {r}")
+        if result.status_code != 200:
+            LOGGER.error(f"Get status fails: {worker_name}, {result}")
             return None
 
-        return r.json()
+        return result.json()
 
     def remove_worker(self, worker_name: str):
         del self.worker_info[worker_name]
@@ -141,12 +185,8 @@ class Controller:
 
     def list_models(self):
         model_names = set()
-
         for w_name, w_info in self.worker_info.items():
             model_names.update(w_info.model_names)
-
-        print(list(model_names))
-
         return list(model_names)
 
     def get_worker_address(self, model_name: str):
@@ -167,7 +207,6 @@ class Controller:
                 worker_name = worker_names[pt]
                 return worker_name
 
-            # Check status before returning
             while True:
                 pt = np.random.choice(np.arange(len(worker_names)), p=worker_speeds)
                 worker_name = worker_names[pt]
@@ -243,8 +282,6 @@ class Controller:
             }
             yield json.dumps(ret).encode() + b"\0"
 
-    # Let the controller act as a worker to achieve hierarchical
-    # management. This can be used to connect isolated sub networks.
     def worker_api_get_status(self):
         model_names = set()
         speed = 0
@@ -282,45 +319,89 @@ app = FastAPI()
 
 
 @app.post("/register_worker")
-async def register_worker(request: Request):
-    data = await request.json()
+async def register_worker(request: Request) -> None:
+    """Registers a new worker with the controller.
+
+    Args:
+        request (Request): The FastAPI Request object containing worker registration data.
+            The JSON body is expected to contain "worker_name", "check_heart_beat" and an optional "worker_status".
+    """
+    data: Dict[str, Any] = await request.json()
     controller.register_worker(data["worker_name"], data["check_heart_beat"], data.get("worker_status", None))
 
 
 @app.post("/refresh_all_workers")
-async def refresh_all_workers():
-    models = controller.refresh_all_workers()
+async def refresh_all_workers() -> None:
+    """Refreshes the status of all workers registered with the controller."""
+    controller.refresh_all_workers()
 
 
 @app.post("/list_models")
-async def list_models():
-    models = controller.list_models()
+async def list_models() -> Dict[str, List[str]]:
+    """Retrieves a list of all models available from the workers.
+
+    Returns:
+        Dict[str, List[str]]: A dictionary containing a list of model names.
+    """
+    models: List[str] = controller.list_models()
     return {"models": models}
 
 
 @app.post("/get_worker_address")
-async def get_worker_address(request: Request):
-    data = await request.json()
-    addr = controller.get_worker_address(data["model"])
+async def get_worker_address(request: Request) -> Dict[str, str]:
+    """Gets the address of a worker serving a specific model.
+
+    Args:
+        request (Request): The FastAPI Request object. The JSON body is expected to contain the "model" name.
+
+    Returns:
+        Dict[str, str]: A dictionary containing the worker's address.
+    """
+    data: Dict[str, str] = await request.json()
+    addr: str = controller.get_worker_address(data["model"])
     return {"address": addr}
 
 
 @app.post("/receive_heart_beat")
-async def receive_heart_beat(request: Request):
-    data = await request.json()
-    exist = controller.receive_heart_beat(data["worker_name"], data["queue_length"])
+async def receive_heart_beat(request: Request) -> Dict[str, bool]:
+    """Receives a heartbeat from a worker and updates its status.
+
+    Args:
+        request (Request): The FastAPI Request object. The JSON body is expected to contain the "worker_name" and "queue_length".
+
+    Returns:
+        Dict[str, bool]: A dictionary with a boolean value indicating if the worker still exists.
+    """
+    data: Dict[str, Any] = await request.json()
+    exist: bool = controller.receive_heart_beat(data["worker_name"], data["queue_length"])
     return {"exist": exist}
 
 
 @app.post("/worker_generate_stream")
-async def worker_api_generate_stream(request: Request):
-    params = await request.json()
+async def worker_api_generate_stream(request: Request) -> StreamingResponse:
+    """Initiates a streaming text generation from a worker.
+
+    Args:
+        request (Request): The FastAPI Request object containing generation parameters in its JSON body.
+
+    Returns:
+        StreamingResponse: A StreamingResponse object that yields generated text chunks.
+    """
+    params: Dict[str, Any] = await request.json()
     generator = controller.worker_api_generate_stream(params)
     return StreamingResponse(generator)
 
 
 @app.post("/worker_get_status")
-async def worker_api_get_status(request: Request):
+async def worker_api_get_status(request: Request) -> Any:
+    """Retrieves the status of the workers.
+
+    Args:
+        request (Request): The FastAPI Request object.
+
+    Returns:
+        Any: A dictionary or other data structure containing the status of the workers.
+    """
     return controller.worker_api_get_status()
 
 
