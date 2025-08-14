@@ -341,10 +341,10 @@ def violates_moderation(text: str) -> bool:
         result: Any = response.json()
         flagged: bool = result["results"][0].get("flagged", False)
     except requests.exceptions.RequestException as e:
-        LOGGER.exception("Moderation request failed: %s", e)
+        LOGGER.exception(f"Moderation request failed: {e}.")
         flagged = False
     except (KeyError, IndexError) as e:
-        LOGGER.exception("Unexpected moderation response format: %s", e)
+        LOGGER.exception(f"Unexpected moderation response format: {e}.")
         flagged = False
 
     return flagged
@@ -552,7 +552,6 @@ def build_demo(embed_mode: bool) -> gr.Blocks:
                     model_selector = gr.Dropdown(
                         choices=models,
                         value=models[0] if len(models) > 0 else "",
-                        # allow_custom_value=True,
                         show_label=False,
                         container=False,
                         interactive=True,
