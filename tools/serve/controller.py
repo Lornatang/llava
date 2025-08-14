@@ -18,7 +18,7 @@ import json
 import threading
 import time
 from enum import Enum
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import requests
@@ -88,21 +88,42 @@ class WorkerInfo:
 
 
 class Controller:
-    def __init__(self, dispatch_method: str):
-        # Dict[str -> WorkerInfo]
-        self.worker_info = {}
-        self.dispatch_method = DispatchMethod.from_str(dispatch_method)
+    """The central component that manages workers and dispatches tasks.
 
-        self.heart_beat_thread = threading.Thread(target=heart_beat_controller, args=(self,))
+    This class handles the registration of workers, monitors their status via heartbeats, and determines the best worker for a given task based on the chosen dispatch method.
+    """
+
+    def __init__(self, dispatch_method: str):
+        """Initializes the controller with a dispatch method.
+
+        Args:
+            dispatch_method: The name of the dispatch method to use (e.g., "lottery", "shortest_queue").
+        """
+        self.worker_info: Dict[str, WorkerInfo] = {}
+        self.dispatch_method: DispatchMethod = DispatchMethod.from_str(dispatch_method)
+        self.heart_beat_thread: threading.Thread = threading.Thread(
+            target=heart_beat_controller,
+            args=(self,),
+        )
         self.heart_beat_thread.start()
 
-        LOGGER.info("Init controller")
+    def register_worker(self, worker_name: str, check_heart_beat: bool, worker_status: Optional[Dict[str, Any]]) -> bool:
+        """Registers or updates a worker's information.
 
-    def register_worker(self, worker_name: str, check_heart_beat: bool, worker_status: dict):
+        If the worker is new, it adds it to the system. If it already exists, it updates its status. It also fetches the worker's status if not provided.
+
+        Args:
+            worker_name (str): The unique name of the worker.
+            check_heart_beat (bool): A boolean indicating if the controller should monitor this worker's heartbeat.
+            worker_status (Optional[Dict[str, Any]]): An optional dictionary containing the worker's status (model_names, speed, queue_length). If `None`, the status is fetched from the worker.
+
+        Returns:
+            bool: A boolean indicating whether the registration was successful.
+        """
         if worker_name not in self.worker_info:
-            LOGGER.info(f"Register a new worker: {worker_name}")
+            LOGGER.info(f"Register a new worker: {worker_name}.")
         else:
-            LOGGER.info(f"Register an existing worker: {worker_name}")
+            LOGGER.info(f"Register an existing worker: {worker_name}.")
 
         if not worker_status:
             worker_status = self.get_worker_status(worker_name)
@@ -117,111 +138,163 @@ class Controller:
             last_heart_beat=str(time.time()),
         )
 
-        LOGGER.info(f"Register done: {worker_name}, {worker_status}")
+        LOGGER.info(f"Register done: {worker_name}, {worker_status}.")
         return True
 
-    def get_worker_status(self, worker_name: str):
+    @staticmethod
+    def get_worker_status(worker_name: str) -> Optional[Dict[str, Any]]:
+        """Fetches the status of a worker by making an HTTP request.
+
+        Args:
+            worker_name (str): The name (and address) of the worker to query.
+
+        Returns:
+            Optional[Dict[str, Any]]: A dictionary with the worker's status if successful, otherwise `None`.
+        """
         try:
             r = requests.post(worker_name + "/worker_get_status", timeout=5)
         except requests.exceptions.RequestException as e:
-            LOGGER.error(f"Get status fails: {worker_name}, {e}")
+            LOGGER.exception(f"Get status fails: {worker_name}, {e}.")
             return None
 
         if r.status_code != 200:
-            LOGGER.error(f"Get status fails: {worker_name}, {r}")
+            LOGGER.error(f"Get status fails: {worker_name}, {r.status_code}.")
             return None
 
         return r.json()
 
-    def remove_worker(self, worker_name: str):
-        del self.worker_info[worker_name]
+    def remove_worker(self, worker_name: str) -> None:
+        """Removes a worker from the controller's registry.
 
-    def refresh_all_workers(self):
-        old_info = dict(self.worker_info)
+        Args:
+            worker_name (str): The name of the worker to remove.
+        """
+        if worker_name in self.worker_info:
+            del self.worker_info[worker_name]
+            LOGGER.info(f"Removed worker: {worker_name}")
+
+    def refresh_all_workers(self) -> None:
+        """Refreshes the status of all registered workers."""
+        old_worker_info = dict(self.worker_info)
         self.worker_info = {}
 
-        for w_name, w_info in old_info.items():
-            if not self.register_worker(w_name, w_info.check_heart_beat, None):
-                LOGGER.info(f"Remove stale worker: {w_name}")
+        for work_name, work_info in old_worker_info.items():
+            if not self.register_worker(work_name, work_info.check_heart_beat, None):
+                LOGGER.info(f"Remove stale worker: {work_name}")
 
-    def list_models(self):
+    def list_models(self) -> List[str]:
+        """Lists all unique model names available across all workers.
+
+        Returns:
+            List[str]: A list of all unique model names.
+        """
         model_names = set()
-        for w_name, w_info in self.worker_info.items():
-            model_names.update(w_info.model_names)
+        for _, work_info in self.worker_info.items():
+            model_names.update(work_info.model_names)
         return list(model_names)
 
-    def get_worker_address(self, model_name: str):
+    def get_worker_address(self, model_name: str) -> str:
+        """Selects a worker to handle a request for a specific model based on the dispatch method.
+
+        Args:
+            model_name (str): The name of the model requested by the client.
+
+        Returns:
+            str: The address of the selected worker, or an empty string if no suitable worker is found.
+        """
         if self.dispatch_method == DispatchMethod.LOTTERY:
             worker_names = []
             worker_speeds = []
-            for w_name, w_info in self.worker_info.items():
-                if model_name in w_info.model_names:
-                    worker_names.append(w_name)
-                    worker_speeds.append(w_info.speed)
-            worker_speeds = np.array(worker_speeds, dtype=np.float32)
-            norm = np.sum(worker_speeds)
+            for work_name, work_info in self.worker_info.items():
+                if model_name in work_info.model_names:
+                    worker_names.append(work_name)
+                    worker_speeds.append(work_info.speed)
+
+            if not worker_names:
+                return ""
+
+            worker_speeds_np = np.array(worker_speeds, dtype=np.float32)
+            norm = np.sum(worker_speeds_np)
             if norm < 1e-4:
                 return ""
-            worker_speeds = worker_speeds / norm
-            if True:  # Directly return address
-                pt = np.random.choice(np.arange(len(worker_names)), p=worker_speeds)
+
+            worker_probabilities = worker_speeds_np / norm
+
+            if True:  # A fast path to directly return a worker address without additional checks.
+                pt = np.random.choice(np.arange(len(worker_names)), p=worker_probabilities)
                 worker_name = worker_names[pt]
                 return worker_name
 
-            # Check status before returning
+            # An alternative path to check worker status before returning, though the fast path is used here.
             while True:
-                pt = np.random.choice(np.arange(len(worker_names)), p=worker_speeds)
+                pt = np.random.choice(np.arange(len(worker_names)), p=worker_probabilities)
                 worker_name = worker_names[pt]
 
                 if self.get_worker_status(worker_name):
-                    break
+                    return worker_name
                 else:
                     self.remove_worker(worker_name)
-                    worker_speeds[pt] = 0
-                    norm = np.sum(worker_speeds)
+                    worker_probabilities[pt] = 0
+                    norm = np.sum(worker_probabilities)
                     if norm < 1e-4:
                         return ""
-                    worker_speeds = worker_speeds / norm
-                    continue
-            return worker_name
+                    worker_probabilities = worker_probabilities / norm
         elif self.dispatch_method == DispatchMethod.SHORTEST_QUEUE:
             worker_names = []
             worker_qlen = []
-            for w_name, w_info in self.worker_info.items():
-                if model_name in w_info.model_names:
-                    worker_names.append(w_name)
-                    worker_qlen.append(w_info.queue_length / w_info.speed)
-            if len(worker_names) == 0:
-                return ""
-            min_index = np.argmin(worker_qlen)
-            w_name = worker_names[min_index]
-            self.worker_info[w_name].queue_length += 1
-            LOGGER.info(f"names: {worker_names}, queue_lens: {worker_qlen}, ret: {w_name}")
-            return w_name
-        else:
-            raise ValueError(f"Invalid dispatch method: {self.dispatch_method}")
+            for work_name, work_info in self.worker_info.items():
+                if model_name in work_info.model_names:
+                    worker_names.append(work_name)
+                    worker_qlen.append(work_info.queue_length / work_info.speed)
 
-    def receive_heart_beat(self, worker_name: str, queue_length: int):
+            if not worker_names:
+                return ""
+
+            min_index = np.argmin(worker_qlen)
+            work_name = worker_names[min_index]
+            self.worker_info[work_name].queue_length += 1
+            LOGGER.info(f"names: {worker_names}, queue_lens: {worker_qlen}, ret: {work_name}.")
+            return work_name
+
+    def receive_heart_beat(self, worker_name: str, queue_length: int) -> bool:
+        """Updates a worker's heartbeat and queue length.
+
+        Args:
+            worker_name (str): The name of the worker sending the heartbeat.
+            queue_length (int): The current queue length of the worker.
+
+        Returns:
+            bool: A boolean indicating if the worker still exists in the controller's registry.
+        """
         if worker_name not in self.worker_info:
-            LOGGER.info(f"Receive unknown heart beat. {worker_name}")
+            LOGGER.info(f"Receive unknown heart beat. {worker_name}.")
             return False
 
         self.worker_info[worker_name].queue_length = queue_length
         self.worker_info[worker_name].last_heart_beat = time.time()
-        LOGGER.info(f"Receive heart beat. {worker_name}")
+        LOGGER.info(f"Receive from {worker_name} heart beat.")
         return True
 
-    def remove_stable_workers_by_expiration(self):
+    def remove_stable_workers_by_expiration(self) -> None:
+        """Removes workers whose heartbeats have expired."""
         expire = time.time() - CONTROLLER_HEART_BEAT_EXPIRATION
         to_delete = []
-        for worker_name, w_info in self.worker_info.items():
-            if w_info.check_heart_beat and w_info.last_heart_beat < expire:
+        for worker_name, work_info in self.worker_info.items():
+            if work_info.check_heart_beat and float(work_info.last_heart_beat) < expire:
                 to_delete.append(worker_name)
 
         for worker_name in to_delete:
             self.remove_worker(worker_name)
 
-    def worker_api_generate_stream(self, params):
+    def worker_api_generate_stream(self, params: Dict[str, Any]) -> Any:
+        """Handles streaming text generation requests by dispatching them to a worker.
+
+        Args:
+            params (Dict[str, Any]): A dictionary of parameters for the text generation request, including the "model" name.
+
+        Yields:
+            Any: Chunks of the streaming response from the worker.
+        """
         worker_addr = self.get_worker_address(params["model"])
         if not worker_addr:
             LOGGER.info(f"no worker: {params['model']}")
@@ -237,29 +310,34 @@ class Controller:
                 if chunk:
                     yield chunk + b"\0"
         except requests.exceptions.RequestException as e:
-            LOGGER.info(f"worker timeout: {worker_addr}")
+            LOGGER.exception(f"worker timeout: {worker_addr}")
             ret = {
                 "text": server_error_msg,
                 "error_code": 3,
             }
             yield json.dumps(ret).encode() + b"\0"
 
-    def worker_api_get_status(self):
-        model_names = set()
-        speed = 0
-        queue_length = 0
+    def worker_api_get_status(self) -> Dict[str, Any]:
+        """Aggregates and returns the status of all registered workers.
 
-        for w_name in self.worker_info:
-            worker_status = self.get_worker_status(w_name)
+        Returns:
+            Dict[str, Any]: A dictionary containing the combined status of all workers, including a list of available model names, total speed, and total queue length.
+        """
+        model_names = set()
+        total_speed = 0
+        total_queue_length = 0
+
+        for work_name in self.worker_info:
+            worker_status = self.get_worker_status(work_name)
             if worker_status is not None:
                 model_names.update(worker_status["model_names"])
-                speed += worker_status["speed"]
-                queue_length += worker_status["queue_length"]
+                total_speed += worker_status["speed"]
+                total_queue_length += worker_status["queue_length"]
 
         return {
             "model_names": list(model_names),
-            "speed": speed,
-            "queue_length": queue_length,
+            "speed": total_speed,
+            "queue_length": total_queue_length,
         }
 
 
