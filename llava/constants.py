@@ -29,3 +29,4 @@ function() {
 """
 MODERATION_MSG = "I am sorry. Your input may violate our content moderation guidelines. Please avoid using harmful or offensive content."
 SERVER_ERROR_MSG = "**NETWORK ERROR DUE TO HIGH TRAFFIC. PLEASE REGENERATE OR REFRESH THIS PAGE.**"
+WORKER_HEART_BEAT_INTERVAL = 15

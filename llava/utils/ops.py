@@ -14,6 +14,7 @@
 import ast
 import base64
 import math
+import threading
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
@@ -34,7 +35,7 @@ __all__ = [
     "KeywordsStoppingCriteria", "convert_expand_to_square", "divide_to_patches", "extract_patches", "find_all_linear_names",
     "get_anyres_image_grid_shape", "get_model_name_from_path", "get_peft_state_maybe_zero_3", "get_peft_state_non_lora_maybe_zero_3",
     "get_mm_adapter_state_maybe_zero_3", "load_image", "load_image_from_base64", "maybe_zero_3", "process_anyres_image", "process_highres_image",
-    "process_highres_image_crop_split", "process_video_with_decord", "process_images", "resize_and_pad_image",
+    "process_highres_image_crop_split", "process_video_with_decord", "process_images", "pretty_print_semaphore", "resize_and_pad_image",
     "select_best_resolution", "split_to_even_chunks", "tokenizer_image_token", "unpad_image",
 ]
 
@@ -537,6 +538,29 @@ def process_images(
     if all(x.shape == new_images[0].shape for x in new_images):
         new_images = torch.stack(new_images, dim=0)
     return new_images
+
+
+def pretty_print_semaphore(semaphore: Optional[threading.Semaphore]) -> str:
+    """Return a human-readable string representation of a threading.Semaphore.
+
+    This function is useful for logging or debugging the state of a semaphore.
+
+    Args:
+        semaphore (Optional[threading.Semaphore]): The semaphore to inspect.
+            If None, the function returns the string "None".
+
+    Returns:
+        str: A string describing the semaphore's current value and locked state,
+             or "None" if the semaphore is None.
+
+    Example:
+        >>> sem = threading.Semaphore(3)
+        >>> pretty_print_semaphore(sem)
+        'Semaphore(value=3, locked=False)'
+    """
+    if semaphore is None:
+        return "None"
+    return f"Semaphore(value={semaphore._value}, locked={semaphore.locked()})"
 
 
 def resize_and_pad_image(

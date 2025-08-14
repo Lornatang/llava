@@ -413,7 +413,7 @@ def http_bot(
         elif "qwen2" in model_name.lower():
             template_name = "qwen2"
         elif "qwen1.5" in model_name.lower():
-            template_name = "llava_llama_2"
+            template_name = "qwen1_5"
         else:
             template_name = "vicuna_v1"
         new_state = conv_templates[template_name].copy()
@@ -552,7 +552,7 @@ def build_demo(embed_mode: bool) -> gr.Blocks:
                     model_selector = gr.Dropdown(
                         choices=models,
                         value=models[0] if len(models) > 0 else "",
-                        allow_custom_value=True,
+                        # allow_custom_value=True,
                         show_label=False,
                         container=False,
                         interactive=True,

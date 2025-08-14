@@ -27,14 +27,13 @@ import torch
 import uvicorn
 from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import StreamingResponse
-from llava.mm_utils import process_images, load_image_from_base64, tokenizer_image_token, KeywordsStoppingCriteria
 from transformers import TextIteratorStreamer
 
 from llava.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
-from llava.constants import WORKER_HEART_BEAT_INTERVAL
-from llava.utils import build_LOGGER, server_error_msg, pretty_print_semaphore
+from llava.constants import SERVER_ERROR_MSG, WORKER_HEART_BEAT_INTERVAL
 from llava.utils.checkpoint import load_pretrained
 from llava.utils.events import LOGGER
+from llava.utils.ops import KeywordsStoppingCriteria, load_image_from_base64, process_images, pretty_print_semaphore, tokenizer_image_token
 
 worker_id = str(uuid.uuid4())[:6]
 global_counter = 0
@@ -189,21 +188,21 @@ class ModelWorker:
         except ValueError as e:
             LOGGER.exception(e)
             ret = {
-                "text": server_error_msg,
+                "text": SERVER_ERROR_MSG,
                 "error_code": 1,
             }
             yield json.dumps(ret).encode() + b"\0"
         except torch.cuda.CudaError as e:
             LOGGER.exception(e)
             ret = {
-                "text": server_error_msg,
+                "text": SERVER_ERROR_MSG,
                 "error_code": 1,
             }
             yield json.dumps(ret).encode() + b"\0"
         except Exception as e:
             LOGGER.exception(e)
             ret = {
-                "text": server_error_msg,
+                "text": SERVER_ERROR_MSG,
                 "error_code": 1,
             }
             yield json.dumps(ret).encode() + b"\0"
