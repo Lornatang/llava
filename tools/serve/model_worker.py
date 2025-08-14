@@ -14,11 +14,11 @@
 import argparse
 import asyncio
 import json
+import threading
 import time
 import uuid
 from functools import partial
 from pathlib import Path
-from threading import Thread
 from typing import Any, Callable, Dict, Generator, Optional, Union
 
 import requests
@@ -141,6 +141,10 @@ class ModelWorker:
 
         LOGGER.info(f"Loading the model {self.model_path} on worker {worker_id} ...")
         self.tokenizer, self.model, self.image_processor, self.context_length = load_pretrained(model_path, load_8bit, load_4bit)
+
+        self.register_to_controller()
+        self.heart_beat_thread = threading.Thread(target=heart_beat_worker, args=(self,))
+        self.heart_beat_thread.start()
 
     def register_to_controller(self) -> None:
         """Registers this worker to the controller.
@@ -296,7 +300,7 @@ class ModelWorker:
             return
 
         # Start model generation in a separate thread.
-        thread = Thread(
+        thread = threading.Thread(
             target=model.generate,
             kwargs=dict(
                 inputs=input_ids,
