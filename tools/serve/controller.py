@@ -26,10 +26,10 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 
+from llava.constants import SERVER_ERROR_MSG
 from llava.utils.events import LOGGER
 
 CONTROLLER_HEART_BEAT_EXPIRATION = 30
-server_error_msg = "**NETWORK ERROR DUE TO HIGH TRAFFIC. PLEASE REGENERATE OR REFRESH THIS PAGE.**"
 
 
 class DispatchMethod(Enum):
@@ -299,7 +299,7 @@ class Controller:
         if not worker_addr:
             LOGGER.info(f"no worker: {params['model']}")
             ret = {
-                "text": server_error_msg,
+                "text": SERVER_ERROR_MSG,
                 "error_code": 2,
             }
             yield json.dumps(ret).encode() + b"\0"
@@ -312,7 +312,7 @@ class Controller:
         except requests.exceptions.RequestException as e:
             LOGGER.exception(f"worker timeout: {worker_addr}")
             ret = {
-                "text": server_error_msg,
+                "text": SERVER_ERROR_MSG,
                 "error_code": 3,
             }
             yield json.dumps(ret).encode() + b"\0"
@@ -353,6 +353,30 @@ def heart_beat_controller(controller: Any):
     while True:
         time.sleep(CONTROLLER_HEART_BEAT_EXPIRATION)
         controller.remove_stable_workers_by_expiration()
+
+
+def get_opts() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--host",
+        default="0.0.0.0",
+        type=str,
+        help="Host to listen on. Defaults to ``0.0.0.0``.",
+    )
+    parser.add_argument(
+        "--port",
+        default=10000,
+        type=int,
+        help="Port to listen on. Defaults to 10000.",
+    )
+    parser.add_argument(
+        "--dispatch-method",
+        default="shortest_queue",
+        type=str,
+        choices=["lottery", "shortest_queue"],
+        help="Method to dispatch requests to workers. Defaults to ``shortest_queue``.",
+    )
+    return parser.parse_args()
 
 
 app = FastAPI()
@@ -446,12 +470,12 @@ async def worker_api_get_status(request: Request) -> Any:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--host", type=str, default="localhost")
-    parser.add_argument("--port", type=int, default=21001)
-    parser.add_argument("--dispatch-method", type=str, choices=["lottery", "shortest_queue"], default="shortest_queue")
-    args = parser.parse_args()
-    LOGGER.info(f"args: {args}")
+    opts = get_opts()
 
-    controller = Controller(args.dispatch_method)
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    controller = Controller(opts.dispatch_method)
+    uvicorn.run(
+        app,
+        host=opts.host,
+        port=opts.port,
+        log_level="info",
+    )
