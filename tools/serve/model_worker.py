@@ -14,13 +14,12 @@
 import argparse
 import asyncio
 import json
-import threading
 import time
 import uuid
 from functools import partial
 from pathlib import Path
 from threading import Thread
-from typing import Any, Dict, Callable, Optional
+from typing import Any, Callable, Dict, Generator, Optional, Union
 
 import requests
 import torch
@@ -35,45 +34,155 @@ from llava.utils.checkpoint import load_pretrained
 from llava.utils.events import LOGGER
 from llava.utils.ops import KeywordsStoppingCriteria, load_image_from_base64, process_images, pretty_print_semaphore, tokenizer_image_token
 
-worker_id = str(uuid.uuid4())[:6]
-global_counter = 0
+GLOBAL_COUNTER = 0
+MODEL_SEMAPHORE = None
 
-model_semaphore = None
+
+def get_opts() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--host",
+        default="0.0.0.0",
+        type=str,
+        help="Host IP to listen on. Defaults to ``0.0.0.0``.",
+    )
+    parser.add_argument(
+        "--port",
+        default=40000,
+        type=int,
+        help="Port to listen on. Defaults to 40000.",
+    )
+    parser.add_argument(
+        "--worker-address",
+        default="http://127.0.0.1:40000",
+        type=str,
+        help="Publicly accessible worker address. Defaults to ``http://127.0.0.1:40000``.",
+    )
+    parser.add_argument(
+        "--controller-address",
+        default="http://127.0.0.1:10000",
+        type=str,
+        help="Controller server address. Defaults to ``http://127.0.0.1:10000``.",
+    )
+    parser.add_argument(
+        "--model-path",
+        default="./results/stage2_finetune_ov/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-stage2_ov_data",
+        type=str,
+        help="Path to the model checkpoint directory. Defaults to ``./results/stage2_finetune_ov/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-stage2_ov_data``.",
+    )
+    parser.add_argument(
+        "--limit-model-concurrency",
+        default=5,
+        type=int,
+        help="Maximum number of concurrent model requests allowed.",
+    )
+    parser.add_argument(
+        "--stream-interval",
+        default=1,
+        type=int,
+        help="Interval in seconds between streaming outputs.",
+    )
+    parser.add_argument(
+        "--load-8bit",
+        action="store_true",
+        help="Enable 8-bit quantization for model loading.",
+    )
+    parser.add_argument(
+        "--load-4bit",
+        action="store_true",
+        help="Enable 4-bit quantization for model loading.",
+    )
+    return parser.parse_args()
 
 
 class ModelWorker:
-    def __init__(self, controller_addr, worker_addr, worker_id, no_register, model_path, load_8bit, load_4bit):
+    """A worker node that loads a model and communicates with a central controller.
+
+    This class is responsible for:
+      - Loading the model and tokenizer
+      - Registering itself with the controller
+      - Sending periodic heartbeats to indicate availability
+      - Reporting queue length and other status metrics
+
+    Attributes:
+        controller_addr (str): The HTTP address of the controller service.
+        worker_addr (str): The HTTP address of this worker.
+        worker_id (str): Unique identifier for the worker.
+        model_path (Path): Filesystem path to the model directory or file.
+        tokenizer: Tokenizer object loaded from the pretrained model.
+        model: Model object loaded from the pretrained model.
+        image_processor: Image preprocessing utility from the pretrained model.
+        context_length (int): Maximum context length supported by the model.
+    """
+
+    def __init__(
+            self,
+            controller_addr: str,
+            worker_addr: str,
+            worker_id: str,
+            model_path: Union[str, Path],
+            load_8bit: bool,
+            load_4bit: bool,
+    ):
+        """Initializes a ModelWorker by loading the pretrained model and tokenizer.
+
+        Args:
+            controller_addr (str): Controller HTTP endpoint.
+            worker_addr (str): This worker's HTTP endpoint.
+            worker_id (str): Unique worker identifier.
+            model_path (Union[str, Path]): Path to the pretrained model.
+            load_8bit (bool): Whether to load the model in 8-bit precision.
+            load_4bit (bool): Whether to load the model in 4-bit precision.
+        """
         self.controller_addr = controller_addr
         self.worker_addr = worker_addr
         self.worker_id = worker_id
         self.model_path = model_path
-        if model_path.endswith("/"):
-            model_path = model_path[:-1]
 
         LOGGER.info(f"Loading the model {self.model_path} on worker {worker_id} ...")
-        self.tokenizer, self.model, self.image_processor, self.context_len = load_pretrained(model_path, load_8bit, load_4bit)
-        if not no_register:
-            self.register_to_controller()
-            self.heart_beat_thread = threading.Thread(target=heart_beat_worker, args=(self,))
-            self.heart_beat_thread.start()
+        self.tokenizer, self.model, self.image_processor, self.context_length = load_pretrained(model_path, load_8bit, load_4bit)
 
-    def register_to_controller(self):
+    def register_to_controller(self) -> None:
+        """Registers this worker to the controller.
+
+        Sends a POST request to the controller's `/register_worker` endpoint,
+        including the worker's status and name.
+        """
         LOGGER.info("Register to controller")
-
         url = self.controller_addr + "/register_worker"
-        data = {"worker_name": self.worker_addr, "check_heart_beat": True, "worker_status": self.get_status()}
+        data = {
+            "worker_name": self.worker_addr,
+            "check_heart_beat": True,
+            "worker_status": self.get_status(),
+        }
         r = requests.post(url, json=data)
         assert r.status_code == 200
 
-    def send_heart_beat(self):
+    def send_heart_beat(self) -> None:
+        """Sends periodic heartbeat signals to the controller.
+
+        This method continuously attempts to send a POST request to the
+        `/receive_heart_beat` endpoint of the controller to report the current
+        queue length. If the worker is not registered, it will attempt to
+        re-register.
+
+        Retries every 5 seconds upon failure.
+        """
         LOGGER.info(
-            f"Send heart beat. Models: {[self.model_path]}. " f"Semaphore: {pretty_print_semaphore(model_semaphore)}. " f"global_counter: {global_counter}")
+            f"Send heart beat. Models: {[self.model_path]}. "
+            f"Semaphore: {pretty_print_semaphore(MODEL_SEMAPHORE)}. "
+            f"global_counter: {GLOBAL_COUNTER}."
+        )
 
         url = self.controller_addr + "/receive_heart_beat"
 
         while True:
             try:
-                ret = requests.post(url, json={"worker_name": self.worker_addr, "queue_length": self.get_queue_length()}, timeout=5)
+                ret = requests.post(
+                    url,
+                    json={"worker_name": self.worker_addr, "queue_length": self.get_queue_length()},
+                    timeout=5,
+                )
                 exist = ret.json()["exist"]
                 break
             except requests.exceptions.RequestException as e:
@@ -85,11 +194,27 @@ class ModelWorker:
 
     @staticmethod
     def get_queue_length() -> int:
-        if model_semaphore is None:
-            return 0
-        return args.limit_model_concurrency - model_semaphore._value + (len(model_semaphore._waiters) if model_semaphore._waiters is not None else 0)
+        """Gets the number of pending requests in the model's queue.
 
-    def get_status(self):
+        Returns:
+            int: The total number of requests waiting to be processed, including
+            currently active ones.
+        """
+        if MODEL_SEMAPHORE is None:
+            return 0
+        return (
+                opts.limit_model_concurrency
+                - MODEL_SEMAPHORE._value
+                + (len(MODEL_SEMAPHORE._waiters) if MODEL_SEMAPHORE._waiters is not None else 0)
+        )
+
+    def get_status(self) -> Dict[str, Any]:
+        """Retrieves the current status of the worker.
+
+        Returns:
+            Dict[str, Any]: A dictionary containing model name(s), processing speed,
+            and queue length.
+        """
         return {
             "model_names": [Path(self.model_path).name],
             "speed": 1,
@@ -97,13 +222,34 @@ class ModelWorker:
         }
 
     @torch.inference_mode()
-    def generate_stream(self, params):
+    def generate_stream(self, params: Dict[str, Any]) -> Generator[bytes, None, None]:
+        """Generates text from a given prompt in a streaming fashion.
+
+        Handles both text-only prompts and prompts that include images.
+
+        Args:
+            params (Dict[str, Any]): Inference parameters including:
+                - prompt (str): The text prompt, possibly with image tokens.
+                - images (Optional[List[str]]): Base64-encoded images.
+                - temperature (float): Sampling temperature.
+                - top_p (float): Nucleus sampling probability.
+                - max_new_tokens (int): Maximum number of new tokens to generate.
+                - stop (Optional[str]): Stop string.
+
+        Yields:
+            bytes: JSON-encoded partial output messages, terminated by b"\\0".
+
+        Raises:
+            ValueError: If the number of provided images does not match the number of image tokens in the prompt.
+        """
         tokenizer, model, image_processor = self.tokenizer, self.model, self.image_processor
 
         prompt = params["prompt"]
-        ori_prompt = prompt
+        original_prompt = prompt
         images = params.get("images", None)
         num_image_tokens = 0
+
+        # Process images if provided.
         if images is not None and len(images) > 0:
             if len(images) > 0:
                 if len(images) != prompt.count(DEFAULT_IMAGE_TOKEN):
@@ -131,43 +277,44 @@ class ModelWorker:
         else:
             image_args = {}
 
-        temperature = float(params.get("temperature", 1.0))
-        top_p = float(params.get("top_p", 1.0))
-        max_context_length = getattr(model.config, "max_position_embeddings", 2048)
-        max_new_tokens = min(int(params.get("max_new_tokens", 256)), 1024)
-        stop_str = params.get("stop", None)
-        do_sample = True if temperature > 0.001 else False
-
+        # Tokenize and prepare input.
         input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt").unsqueeze(0).cuda()
+        attention_mask = (input_ids != tokenizer.pad_token_id).long().cuda()
+        temperature = float(params.get("temperature", 0.2))
+        top_p = float(params.get("top_p", 1.0))
+        max_new_tokens = min(int(params.get("max_new_tokens", 256)), 2048)
+        max_context_length = getattr(model.config, "max_position_embeddings", 2048)
+        stop_str = params.get("stop", None)
         keywords = [stop_str]
         stopping_criteria = KeywordsStoppingCriteria(keywords, tokenizer, input_ids)
         streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True, timeout=15)
 
         max_new_tokens = min(max_new_tokens, max_context_length - input_ids.shape[-1] - num_image_tokens)
-
         if max_new_tokens < 1:
             yield json.dumps(
-                {"text": ori_prompt + "Exceeds max token length. Please start a new conversation, thanks.", "error_code": 0}).encode() + b"\0"
+                {"text": original_prompt + "Exceeds max token length. Please start a new conversation, thanks.", "error_code": 0}).encode() + b"\0"
             return
 
+        # Start model generation in a separate thread.
         thread = Thread(
             target=model.generate,
             kwargs=dict(
                 inputs=input_ids,
-                do_sample=do_sample,
+                attention_mask=attention_mask,
+                do_sample=True,
                 temperature=temperature,
                 top_p=top_p,
                 max_new_tokens=max_new_tokens,
                 streamer=streamer,
-                stopping_criteria=[stopping_criteria],
                 use_cache=True,
+                stopping_criteria=[stopping_criteria],
                 **image_args,
             ),
         )
         thread.start()
 
         start_time = time.time()
-        generated_text = ori_prompt
+        generated_text = original_prompt
         for new_text in streamer:
             generated_text += new_text
             if generated_text.endswith(stop_str):
@@ -176,12 +323,23 @@ class ModelWorker:
 
         end_time = time.time()
 
-        new_generated = generated_text[len(ori_prompt):]
+        new_generated = generated_text[len(original_prompt):]
         new_generated_tokens = tokenizer(new_generated).input_ids
         token_per_second = len(new_generated_tokens) / (end_time - start_time)
-        print(f"token_per_second: {token_per_second}")
+        print(f"token_per_second: {token_per_second}.")
 
-    def generate_stream_gate(self, params):
+    def generate_stream_gate(self, params: Dict[str, Any]) -> Generator[bytes, None, None]:
+        """Wrapper for `generate_stream` with error handling.
+
+        Catches ValueError, CUDA errors, and general exceptions,
+        logging the errors and returning a standard error message.
+
+        Args:
+            params (Dict[str, Any]): Same parameters as `generate_stream`.
+
+        Yields:
+            bytes: JSON-encoded messages with either partial output or error text.
+        """
         try:
             for x in self.generate_stream(params):
                 yield x
@@ -233,7 +391,7 @@ def release_model_semaphore(fn: Optional[Callable[[], None]] = None) -> None:
         fn (Optional[Callable[[], None]]): A callback function to be called
             after releasing the semaphore. Defaults to None.
     """
-    model_semaphore.release()
+    MODEL_SEMAPHORE.release()
     if fn is not None:
         fn()
 
@@ -256,14 +414,14 @@ async def generate_stream(request: Request) -> StreamingResponse:
     Returns:
         StreamingResponse: A streaming response yielding generation outputs.
     """
-    global model_semaphore, global_counter
-    global_counter += 1
+    global MODEL_SEMAPHORE, GLOBAL_COUNTER
+    GLOBAL_COUNTER += 1
     params = await request.json()
 
-    if model_semaphore is None:
-        model_semaphore = asyncio.Semaphore(args.limit_model_concurrency)
+    if MODEL_SEMAPHORE is None:
+        MODEL_SEMAPHORE = asyncio.Semaphore(opts.limit_model_concurrency)
 
-    await model_semaphore.acquire()
+    await MODEL_SEMAPHORE.acquire()
     worker.send_heart_beat()
 
     generator = worker.generate_stream_gate(params)
@@ -287,31 +445,19 @@ async def get_status(request: Request) -> Dict:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--host", type=str, default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=40000)
-    parser.add_argument("--worker-address", type=str, default="http://127.0.0.1:40000")
-    parser.add_argument("--controller-address", type=str, default="http://127.0.0.1:10000")
-    parser.add_argument("--model-path", type=str, default="./results/stage2_finetune_ov/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-stage2_ov_data")
-    parser.add_argument("--limit-model-concurrency", type=int, default=5)
-    parser.add_argument("--stream-interval", type=int, default=1)
-    parser.add_argument("--no-register", action="store_true")
-    parser.add_argument("--load-8bit", action="store_true")
-    parser.add_argument("--load-4bit", action="store_true")
-    args = parser.parse_args()
+    opts = get_opts()
 
     worker = ModelWorker(
-        args.controller_address,
-        args.worker_address,
-        worker_id,
-        args.no_register,
-        args.model_path,
-        args.load_8bit,
-        args.load_4bit,
+        opts.controller_address,
+        opts.worker_address,
+        str(uuid.uuid4())[:6],
+        opts.model_path,
+        opts.load_8bit,
+        opts.load_4bit,
     )
     uvicorn.run(
         app,
-        host=args.host,
-        port=args.port,
+        host=opts.host,
+        port=opts.port,
         log_level="info",
     )
