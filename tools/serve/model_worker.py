@@ -250,10 +250,10 @@ async def get_status(request: Request):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--host", type=str, default="localhost")
-    parser.add_argument("--port", type=int, default=21002)
-    parser.add_argument("--worker-address", type=str, default="http://localhost:21002")
-    parser.add_argument("--controller-address", type=str, default="http://localhost:21001")
+    parser.add_argument("--host", type=str, default="0.0.0.0")
+    parser.add_argument("--port", type=int, default=40000)
+    parser.add_argument("--worker-address", type=str, default="http://127.0.0.1:40000")
+    parser.add_argument("--controller-address", type=str, default="http://127.0.0.1:10000")
     parser.add_argument("--model-path", type=str, default="facebook/opt-350m")
     parser.add_argument("--model-base", type=str, default=None)
     parser.add_argument("--model-name", type=str)

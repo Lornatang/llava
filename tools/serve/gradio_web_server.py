@@ -537,14 +537,13 @@ def build_demo(embed_mode: bool) -> gr.Blocks:
             # Left column: model selection, image input, parameters.
             with gr.Column(scale=3):
                 with gr.Row(elem_id="model_selector_row"):
-                    default_model = models[0] if models else None
                     model_selector = gr.Dropdown(
                         choices=models,
-                        value=default_model,
+                        value=models[0] if len(models) > 0 else "",
                         allow_custom_value=True,
-                        interactive=True,
                         show_label=False,
                         container=False,
+                        interactive=True,
                     )
 
                 imagebox = gr.Image(type="pil")
