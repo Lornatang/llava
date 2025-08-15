@@ -14,7 +14,6 @@
 import argparse
 import hashlib
 import json
-import os
 import time
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +25,7 @@ import requests
 from llava.constants import GET_QUERY_PARAMS_FROM_WINDOW, MODERATION_MSG, SERVER_ERROR_MSG
 from llava.conversation import default_conversation, conv_templates
 from llava.utils.events import LOGGER
+from llava.utils.ops import violates_moderation
 
 HEADERS = {"User-Agent": "LLaVA Web Client"}
 TITLE_MARKDOWN = """
@@ -59,7 +59,7 @@ def get_opts() -> argparse.Namespace:
         help="Port to listen on. Defaults to 7860."
     )
     parser.add_argument(
-        "--controller-url",
+        "--controller",
         type=str,
         default="http://127.0.0.1:10000",
         help="Controller URL to fetch worker addresses. Defaults to ``http://127.0.0.1:10000``."
@@ -111,7 +111,7 @@ def add_text(
     Returns:
         Any: Tuple containing updated state, chatbot messages, message string, None, and 5 button states.
     """
-    LOGGER.info(f"add_text. ip: {request.client.host}. len: {len(text)}.")
+    LOGGER.info(f"add_text. IP: {request.client.host}. Length: {len(text)}.")
 
     if len(text) <= 0 and image is None:
         state.skip_next = True
@@ -147,7 +147,7 @@ def clear_history(request: gr.Request) -> Any:
     Returns:
         Any: Tuple containing reset state, empty chatbot, empty string, None, and 5 disabled buttons.
     """
-    LOGGER.info(f"clear_history. ip: {request.client.host}")
+    LOGGER.info(f"clear_history. IP: {request.client.host}")
     state = default_conversation.copy()
     return (state, state.to_gradio_chatbot(), "", None) + (DISABLE_BTN,) * 5
 
@@ -163,7 +163,7 @@ def downvote_last_response(state: Any, model_selector: str, request: gr.Request)
     Returns:
         Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Any]]: Tuple of output values for Gradio: empty string and 3 disabled buttons.
     """
-    LOGGER.info(f"downvote. ip: {request.client.host}")
+    LOGGER.info(f"downvote_last_response. IP: {request.client.host}")
     vote_last_response(state, "downvote", model_selector, request)
     return ("",) + (DISABLE_BTN,) * 3
 
@@ -179,7 +179,7 @@ def flag_last_response(state: Any, model_selector: str, request: gr.Request) -> 
     Returns:
         Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Any]]: Tuple of output values for Gradio: empty string and 3 disabled buttons.
     """
-    LOGGER.info(f"flag. ip: {request.client.host}")
+    LOGGER.info(f"flag_last_response. IP: {request.client.host}")
     vote_last_response(state, "flag", model_selector, request)
     return ("",) + (DISABLE_BTN,) * 3
 
@@ -211,10 +211,10 @@ def get_model_list() -> List[str]:
         requests.RequestException: If the network request encounters an error.
         KeyError: If the returned JSON does not contain the "models" key.
     """
-    ret = requests.post(f"{opts.controller_url}/refresh_all_workers")
+    ret = requests.post(f"{opts.controller}/refresh_all_workers")
     assert ret.status_code == 200, "Failed to refresh all workers"
 
-    ret = requests.post(f"{opts.controller_url}/list_models")
+    ret = requests.post(f"{opts.controller}/list_models")
     ret.raise_for_status()
     models = ret.json()["models"]
 
@@ -240,7 +240,7 @@ def load_demo(url_params: Dict[str, str], request: gr.Request) -> Tuple[Any, Dic
             - `state`: A copy of the default conversation state.
             - `dropdown_update`: Gradio Dropdown update object, optionally setting `value` and `visible`.
     """
-    LOGGER.info(f"load_demo. ip: {request.client.host}. params: {url_params}.")
+    LOGGER.info(f"load_demo. IP: {request.client.host}. Params: {url_params}.")
 
     dropdown_update: Dict[str, Any] = {"visible": True}
 
@@ -264,12 +264,15 @@ def load_demo_refresh_model_list(request: gr.Request) -> Tuple[Any, Dict[str, An
             - `dropdown_update`: Dictionary to update the model dropdown choices and selected value.
     """
     models = get_model_list()
-    LOGGER.info(f"load_demo_refresh_model_list called from {request.client.host}, models found: {len(models)}.")
+
+    LOGGER.info(
+        f"load_demo_refresh_model_list. "
+        f"IP: {request.client.host}. "
+        f"Found {len(models)} models: {models if len(models) <= 5 else models[:5] + ['...']}",
+    )
 
     state = default_conversation.copy()
-    default_model = models[0] if models else None
-
-    dropdown_update = gr.update(choices=models, value=default_model)
+    dropdown_update = gr.update(choices=models, value=models[0] if models else None)
     return state, dropdown_update
 
 
@@ -284,7 +287,7 @@ def regenerate(state: Any, image_process_mode: str, request: gr.Request) -> Any:
     Returns:
         Any: Tuple containing updated state, chatbot messages, empty string, None, and 5 disabled buttons.
     """
-    LOGGER.info(f"regenerate. ip: {request.client.host}.")
+    LOGGER.info(f"regenerate. IP: {request.client.host}.")
 
     # Ensure there is at least one assistant message to clear.
     if state.messages and isinstance(state.messages[-1], list) and len(state.messages[-1]) > 1:
@@ -311,48 +314,9 @@ def upvote_last_response(state: Any, model_selector: str, request: gr.Request) -
     Returns:
         Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Any]]: Tuple of output values for Gradio: empty string and 3 disabled buttons.
     """
-    LOGGER.info(f"upvote. ip: {request.client.host}")
+    LOGGER.info(f"upvote_last_response. IP: {request.client.host}")
     vote_last_response(state, "upvote", model_selector, request)
     return ("",) + (DISABLE_BTN,) * 3
-
-
-def violates_moderation(text: str) -> bool:
-    """Check whether the given text violates the OpenAI moderation API.
-
-    This function sends the input text to OpenAI's moderation endpoint and
-    returns True if the text is flagged for violating content policies.
-
-    Args:
-        text (str): The text to check for policy violations.
-
-    Returns:
-        bool: True if the text is flagged as violating the moderation policy, False otherwise or if an error occurs.
-    """
-    url = "https://api.openai.com/v1/moderations"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + os.environ.get("OPENAI_API_KEY", "")
-    }
-
-    # Remove newlines to avoid JSON issues.
-    clean_text = text.replace("\n", "")
-
-    # Safely encode text as JSON.
-    data = json.dumps({"input": clean_text})
-
-    try:
-        response: requests.Response = requests.post(url, headers=headers, data=data, timeout=5)
-        response.raise_for_status()  # Raise HTTPError for bad HTTP status codes
-        result: Any = response.json()
-        flagged: bool = result["results"][0].get("flagged", False)
-    except requests.exceptions.RequestException as e:
-        LOGGER.exception(f"Moderation request failed: {e}.")
-        flagged = False
-    except (KeyError, IndexError) as e:
-        LOGGER.exception(f"Unexpected moderation response format: {e}.")
-        flagged = False
-
-    return flagged
 
 
 def vote_last_response(state: Any, vote_type: str, model_selector: str, request: gr.Request) -> None:
@@ -399,12 +363,10 @@ def http_bot(
         request (gr.Request): Gradio request object for retrieving client info.
 
     Yields:
-        Any: A tuple containing the updated 
-        conversation state, the Gradio chatbot representation, and button states.
+        Any: A tuple containing the updated conversation state, the Gradio chatbot representation, and button states.
     """
-    LOGGER.info(f"http_bot. ip: {request.client.host}.")
+    LOGGER.info(f"http_bot. IP: {request.client.host}.")
     start_tstamp = time.time()
-    model_name = model_selector
 
     # Skip generation if flagged.
     if state.skip_next:
@@ -413,11 +375,11 @@ def http_bot(
 
     # Initialize conversation template if new.
     if len(state.messages) == state.offset + 2:
-        if "qwen2.5" in model_name.lower():
+        if "qwen2.5" in model_selector.lower():
             template_name = "qwen2_5"
-        elif "qwen2" in model_name.lower():
+        elif "qwen2" in model_selector.lower():
             template_name = "qwen2"
-        elif "qwen1.5" in model_name.lower():
+        elif "qwen1.5" in model_selector.lower():
             template_name = "qwen1_5"
         else:
             template_name = "vicuna_v1"
@@ -427,13 +389,12 @@ def http_bot(
         state = new_state
 
     # Query worker address from controller.
-    controller_url = opts.controller_url
-    ret = requests.post(controller_url + "/get_worker_address", json={"model": model_name})
-    worker_addr = ret.json()["address"]
-    LOGGER.info(f"model_name: {model_name}, worker_addr: {worker_addr}")
+    ret = requests.post(opts.controller + "/get_worker_address", json={"model": model_selector})
+    worker_address = ret.json()["address"]
+    LOGGER.info(f"model_name: {model_selector}, worker_address: {worker_address}.")
 
     # No available worker.
-    if worker_addr == "":
+    if worker_address == "":
         state.messages[-1][-1] = SERVER_ERROR_MSG
         yield state, state.to_gradio_chatbot(), DISABLE_BTN, DISABLE_BTN, DISABLE_BTN, ENABLE_BTN, ENABLE_BTN
         return
@@ -453,7 +414,7 @@ def http_bot(
 
     # Prepare payload.
     pload = {
-        "model": model_name,
+        "model": model_selector,
         "prompt": prompt,
         "temperature": float(temperature),
         "top_p": float(top_p),
@@ -470,7 +431,7 @@ def http_bot(
 
     # Stream response from worker.
     try:
-        response = requests.post(worker_addr + "/worker_generate_stream", headers=HEADERS, json=pload, stream=True, timeout=100)
+        response = requests.post(worker_address + "/worker_generate_stream", headers=HEADERS, json=pload, stream=True, timeout=100)
         last_print_time = time.time()
         for chunk in response.iter_lines(decode_unicode=False, delimiter=b"\0"):
             if chunk:
@@ -487,7 +448,7 @@ def http_bot(
                     yield (state, state.to_gradio_chatbot()) + (DISABLE_BTN, DISABLE_BTN, DISABLE_BTN, ENABLE_BTN, ENABLE_BTN)
                     return
                 time.sleep(0.03)
-    except requests.exceptions.RequestException as e:
+    except requests.exceptions.RequestException as e:  # noqa.
         state.messages[-1][-1] = SERVER_ERROR_MSG
         yield (state, state.to_gradio_chatbot()) + (DISABLE_BTN, DISABLE_BTN, DISABLE_BTN, ENABLE_BTN, ENABLE_BTN)
         return
@@ -503,7 +464,7 @@ def http_bot(
     data = {
         "tstamp": round(finish_tstamp, 4),
         "type": "chat",
-        "model": model_name,
+        "model": model_selector,
         "start": round(start_tstamp, 4),
         "finish": round(start_tstamp, 4),
         "state": state.dict(),
@@ -534,8 +495,8 @@ def build_demo() -> gr.Blocks:
     """
     # User input textbox.
     textbox = gr.Textbox(
-        show_label=False,
         placeholder="Enter text and press ENTER",
+        show_label=False,
         container=False
     )
 
@@ -690,4 +651,7 @@ if __name__ == "__main__":
 
     models = get_model_list()
     demo = build_demo()
-    demo.queue(api_open=False, max_size=opts.concurrency_count).launch(server_name=opts.host, server_port=opts.port, share=opts.share)
+    demo.queue(
+        api_open=False,
+        max_size=opts.concurrency_count,
+    ).launch(server_name=opts.host, server_port=opts.port, share=opts.share)

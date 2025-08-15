@@ -53,13 +53,13 @@ def get_opts() -> argparse.Namespace:
         help="Port to listen on. Defaults to 40000.",
     )
     parser.add_argument(
-        "--worker-address",
+        "--worker",
         default="http://127.0.0.1:40000",
         type=str,
         help="Publicly accessible worker address. Defaults to ``http://127.0.0.1:40000``.",
     )
     parser.add_argument(
-        "--controller-address",
+        "--controller",
         default="http://127.0.0.1:10000",
         type=str,
         help="Controller server address. Defaults to ``http://127.0.0.1:10000``.",
@@ -105,8 +105,8 @@ class ModelWorker:
       - Reporting queue length and other status metrics
 
     Attributes:
-        controller_addr (str): The HTTP address of the controller service.
-        worker_addr (str): The HTTP address of this worker.
+        controller (str): The HTTP address of the controller service.
+        worker (str): The HTTP address of this worker.
         worker_id (str): Unique identifier for the worker.
         model_path (Path): Filesystem path to the model directory or file.
         tokenizer: Tokenizer object loaded from the pretrained model.
@@ -117,8 +117,8 @@ class ModelWorker:
 
     def __init__(
             self,
-            controller_addr: str,
-            worker_addr: str,
+            controller: str,
+            worker: str,
             worker_id: str,
             model_path: Union[str, Path],
             load_8bit: bool,
@@ -127,15 +127,15 @@ class ModelWorker:
         """Initializes a ModelWorker by loading the pretrained model and tokenizer.
 
         Args:
-            controller_addr (str): Controller HTTP endpoint.
-            worker_addr (str): This worker's HTTP endpoint.
+            controller (str): Controller HTTP endpoint.
+            worker (str): This worker's HTTP endpoint.
             worker_id (str): Unique worker identifier.
             model_path (Union[str, Path]): Path to the pretrained model.
             load_8bit (bool): Whether to load the model in 8-bit precision.
             load_4bit (bool): Whether to load the model in 4-bit precision.
         """
-        self.controller_addr = controller_addr
-        self.worker_addr = worker_addr
+        self.controller = controller
+        self.worker = worker
         self.worker_id = worker_id
         self.model_path = model_path
 
@@ -153,9 +153,9 @@ class ModelWorker:
         including the worker's status and name.
         """
         LOGGER.info("Register to controller.")
-        url = self.controller_addr + "/register_worker"
+        url = self.controller + "/register_worker"
         data = {
-            "worker_name": self.worker_addr,
+            "worker_name": self.worker,
             "check_heart_beat": True,
             "worker_status": self.get_status(),
         }
@@ -178,13 +178,13 @@ class ModelWorker:
             f"global_counter: {global_counter}."
         )
 
-        url = self.controller_addr + "/receive_heart_beat"
+        url = self.controller + "/receive_heart_beat"
 
         while True:
             try:
                 ret = requests.post(
                     url,
-                    json={"worker_name": self.worker_addr, "queue_length": self.get_queue_length()},
+                    json={"worker_name": self.worker, "queue_length": self.get_queue_length()},
                     timeout=5,
                 )
                 exist = ret.json()["exist"]
@@ -444,8 +444,8 @@ if __name__ == "__main__":
     opts = get_opts()
 
     worker = ModelWorker(
-        opts.controller_address,
-        opts.worker_address,
+        opts.controller,
+        opts.worker,
         str(uuid.uuid4())[:6],
         opts.model_path,
         opts.load_8bit,

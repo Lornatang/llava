@@ -13,12 +13,14 @@
 # ==============================================================================
 import ast
 import base64
-import math
+import json
+import os
 import threading
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
+import math
 import numpy as np
 import requests
 import torch
@@ -36,7 +38,7 @@ __all__ = [
     "get_anyres_image_grid_shape", "get_model_name_from_path", "get_peft_state_maybe_zero_3", "get_peft_state_non_lora_maybe_zero_3",
     "get_mm_adapter_state_maybe_zero_3", "load_image", "load_image_from_base64", "maybe_zero_3", "process_anyres_image", "process_highres_image",
     "process_highres_image_crop_split", "process_video_with_decord", "process_images", "pretty_print_semaphore", "resize_and_pad_image",
-    "select_best_resolution", "split_to_even_chunks", "tokenizer_image_token", "unpad_image",
+    "select_best_resolution", "split_to_even_chunks", "tokenizer_image_token", "violates_moderation", "unpad_image",
 ]
 
 
@@ -735,6 +737,45 @@ def tokenizer_image_token(
             return torch.tensor(input_ids, dtype=torch.long)
         raise ValueError(f"Unsupported tensor type: {return_tensors}")
     return input_ids
+
+
+def violates_moderation(text: str) -> bool:
+    """Check whether the given text violates the OpenAI moderation API.
+
+    This function sends the input text to OpenAI's moderation endpoint and
+    returns True if the text is flagged for violating content policies.
+
+    Args:
+        text (str): The text to check for policy violations.
+
+    Returns:
+        bool: True if the text is flagged as violating the moderation policy, False otherwise or if an error occurs.
+    """
+    url = "https://api.openai.com/v1/moderations"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + os.environ.get("OPENAI_API_KEY", "")
+    }
+
+    # Remove newlines to avoid JSON issues.
+    clean_text = text.replace("\n", "")
+
+    # Safely encode text as JSON.
+    data = json.dumps({"input": clean_text})
+
+    try:
+        response: requests.Response = requests.post(url, headers=headers, data=data, timeout=5)
+        response.raise_for_status()  # Raise HTTPError for bad HTTP status codes
+        result: Any = response.json()
+        flagged: bool = result["results"][0].get("flagged", False)
+    except requests.exceptions.RequestException as e:
+        LOGGER.exception(f"Moderation request failed: {e}.")
+        flagged = False
+    except (KeyError, IndexError) as e:
+        LOGGER.exception(f"Unexpected moderation response format: {e}.")
+        flagged = False
+
+    return flagged
 
 
 def unpad_image(x: torch.Tensor, original_size: Tuple[int, int]) -> torch.Tensor:
