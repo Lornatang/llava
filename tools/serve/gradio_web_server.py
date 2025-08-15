@@ -73,9 +73,9 @@ def get_opts() -> argparse.Namespace:
     parser.add_argument(
         "--model-list-mode",
         type=str,
-        default="once",
+        default="reload",
         choices=["once", "reload"],
-        help="How to load model list. Choices: 'once', 'reload'. Defaults to ``once``."
+        help="How to load model list. Choices: 'once', 'reload'. Defaults to ``reload``."
     )
     parser.add_argument(
         "--share",
@@ -86,11 +86,6 @@ def get_opts() -> argparse.Namespace:
         "--moderate",
         action="store_true",
         help="Enable text moderation for user input."
-    )
-    parser.add_argument(
-        "--embed",
-        action="store_true",
-        help="Run in embedded mode without Markdown title."
     )
     return parser.parse_args()
 
@@ -509,11 +504,8 @@ def http_bot(
         file.write(json.dumps(data) + "\n")
 
 
-def build_demo(embed_mode: bool) -> gr.Blocks:
+def build_demo() -> gr.Blocks:
     """Builds and returns the Gradio demo interface for the LLaVA chatbot.
-
-    Args:
-        embed_mode (bool): If True, the demo will be embedded (without title Markdown).
 
     Returns:
         gr.Blocks: A Gradio Blocks object representing the full chatbot interface.
@@ -541,8 +533,7 @@ def build_demo(embed_mode: bool) -> gr.Blocks:
         # Stores chatbot state.
         state = gr.State()
 
-        if not embed_mode:
-            gr.Markdown(TITLE_MARKDOWN)
+        gr.Markdown(TITLE_MARKDOWN)
 
         with gr.Row():
             # Left column: model selection, image input, parameters.
@@ -688,5 +679,5 @@ if __name__ == "__main__":
     opts = get_opts()
 
     models = get_model_list()
-    demo = build_demo(opts.embed)
+    demo = build_demo()
     demo.queue(api_open=False, max_size=opts.concurrency_count).launch(server_name=opts.host, server_port=opts.port, share=opts.share)
