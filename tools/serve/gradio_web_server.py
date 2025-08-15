@@ -18,7 +18,7 @@ import os
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Union
 
 import gradio as gr
 import requests
@@ -92,9 +92,9 @@ def get_opts() -> argparse.Namespace:
 
 def add_text(
         state: Any,
-        text: str,
+        text: Union[List[str], str],
         image: Any,
-        image_process_mode: str,
+        image_process_mode: Any,
         request: gr.Request
 ) -> Any:
     """Add user text (and optionally image) to the conversation.
@@ -103,15 +103,15 @@ def add_text(
 
     Args:
         state (Any): Current conversation state.
-        text (str): User input text.
+        text (Union[List[str], str]): User input text.
         image (Any): Optional image input.
-        image_process_mode (str): Selected image preprocessing mode.
+        image_process_mode (Any): Selected image preprocessing mode.
         request (gr.Request): Gradio request object.
 
     Returns:
         Any: Tuple containing updated state, chatbot messages, message string, None, and 5 button states.
     """
-    LOGGER.info(f"add_text. ip: {request.client.host}. len: {len(text)}")
+    LOGGER.info(f"add_text. ip: {request.client.host}. len: {len(text)}.")
 
     if len(text) <= 0 and image is None:
         state.skip_next = True
@@ -263,10 +263,13 @@ def load_demo_refresh_model_list(request: gr.Request) -> Tuple[Any, Dict[str, An
             - `state`: Initialized conversation state.
             - `dropdown_update`: Dictionary to update the model dropdown choices and selected value.
     """
-    LOGGER.info(f"load_demo_refresh_model_list. ip: {request.client.host}")
     models = get_model_list()
+    LOGGER.info(f"load_demo_refresh_model_list called from {request.client.host}, models found: {len(models)}.")
+
     state = default_conversation.copy()
-    dropdown_update = {"choices": models, "value": models[0] if len(models) > 0 else ""}
+    default_model = models[0] if models else None
+
+    dropdown_update = gr.update(choices=models, value=default_model)
     return state, dropdown_update
 
 
@@ -282,10 +285,17 @@ def regenerate(state: Any, image_process_mode: str, request: gr.Request) -> Any:
         Any: Tuple containing updated state, chatbot messages, empty string, None, and 5 disabled buttons.
     """
     LOGGER.info(f"regenerate. ip: {request.client.host}.")
-    state.messages[-1][-1] = None
-    prev_human_msg = state.messages[-2]
-    if isinstance(prev_human_msg[1], (tuple, list)):
-        prev_human_msg[1] = (*prev_human_msg[1][:2], image_process_mode)
+
+    # Ensure there is at least one assistant message to clear.
+    if state.messages and isinstance(state.messages[-1], list) and len(state.messages[-1]) > 1:
+        state.messages[-1][-1] = None
+
+    # Update the last human message's image mode if it contains image data.
+    if len(state.messages) >= 2:
+        prev_human_msg = state.messages[-2]
+        if isinstance(prev_human_msg[1], (tuple, list)) and len(prev_human_msg[1]) >= 2:
+            prev_human_msg[1] = (*prev_human_msg[1][:2], image_process_mode)
+
     state.skip_next = False
     return (state, state.to_gradio_chatbot(), "", None) + (DISABLE_BTN,) * 5
 
@@ -318,17 +328,17 @@ def violates_moderation(text: str) -> bool:
     Returns:
         bool: True if the text is flagged as violating the moderation policy, False otherwise or if an error occurs.
     """
-    url: str = "https://api.openai.com/v1/moderations"
-    headers: dict[str, str] = {
+    url = "https://api.openai.com/v1/moderations"
+    headers = {
         "Content-Type": "application/json",
         "Authorization": "Bearer " + os.environ.get("OPENAI_API_KEY", "")
     }
 
     # Remove newlines to avoid JSON issues.
-    clean_text: str = text.replace("\n", "")
+    clean_text = text.replace("\n", "")
 
     # Safely encode text as JSON.
-    data: str = json.dumps({"input": clean_text})
+    data = json.dumps({"input": clean_text})
 
     try:
         response: requests.Response = requests.post(url, headers=headers, data=data, timeout=5)
