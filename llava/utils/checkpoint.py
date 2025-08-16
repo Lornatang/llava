@@ -104,10 +104,10 @@ def load_pretrained(
                 attn_implementation=attn_implementation,
                 **kwargs,
             )
-        token_num, tokem_dim = model.lm_head.out_features, model.lm_head.in_features
+        token_num, token_dim = model.lm_head.out_features, model.lm_head.in_features
         if model.lm_head.weight.shape[0] != token_num:
-            model.lm_head.weight = nn.Parameter(torch.empty(token_num, tokem_dim, device=model.device, dtype=model.dtype))
-            model.model.embed_tokens.weight = nn.Parameter(torch.empty(token_num, tokem_dim, device=model.device, dtype=model.dtype))
+            model.lm_head.weight = nn.Parameter(torch.empty(token_num, token_dim, device=model.device, dtype=model.dtype))
+            model.model.embed_tokens.weight = nn.Parameter(torch.empty(token_num, token_dim, device=model.device, dtype=model.dtype))
 
         LOGGER.info("Loading additional LLaVA weights...")
         non_lora_trainables_path = Path(model_path, "non_lora_trainables.bin")
