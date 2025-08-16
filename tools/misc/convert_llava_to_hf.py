@@ -61,6 +61,7 @@ def save_llavaprocesser(
         tokenizer,
         patch_size,
         vision_feature_select_strategy=vision_feature,
+        chat_template=tokenizer.chat_template,
     )
     llava_processor.save_pretrained(output)
 
