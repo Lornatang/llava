@@ -19,6 +19,7 @@ from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from PIL import Image
+
 from llava.utils.ops import convert_expand_to_square
 
 __all__ = [
@@ -154,10 +155,10 @@ class Conversation:
                     if type(image) != list:
                         image = [image]
                     for img in image:
-                        if not return_path and self.is_image_file(img):
-                            img = self.process_image(img, image_process_mode, return_pil=return_pil)
+                        if isinstance(img, Image.Image):
                             images.append(img)
                         else:
+                            img = self.process_image(img, image_process_mode, return_pil=return_pil)
                             images.append(img)
         return images
 
@@ -258,7 +259,13 @@ class Conversation:
 
                     image_str_list = []
                     for img in image:
-                        if self.is_image_file(img):
+                        if isinstance(img, Image.Image):
+                            buffered = BytesIO()
+                            img.save(buffered, format="JPEG")
+                            image_base64_str = base64.b64encode(buffered.getvalue()).decode()
+                            image_str = f'<img src="data:image/jpeg;base64,{image_base64_str}" style="max-width: 256px; max-height: 256px; width: auto; height: auto; object-fit: contain;"/>'
+                            image_str_list.append(image_str)
+                        elif self.is_video_file(img):
                             image_base64_str = self.process_image(img, "Default", return_pil=False, image_format="JPEG")
                             image_str = f'<img src="data:image/jpeg;base64,{image_base64_str}" style="max-width: 256px; max-height: 256px; width: auto; height: auto; object-fit: contain;"/>'
                             image_str_list.append(image_str)
