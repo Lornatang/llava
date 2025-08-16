@@ -128,6 +128,7 @@ class Controller:
         self.heart_beat_thread: threading.Thread = threading.Thread(
             target=heart_beat_controller,
             args=(self,),
+            daemon=True,
         )
         self.heart_beat_thread.start()
 
