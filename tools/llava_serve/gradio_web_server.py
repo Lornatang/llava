@@ -459,6 +459,7 @@ def http_bot(
 
     # Log conversation.
     finish_tstamp = time.time()
+    LOGGER.info(f"{output}")
     log_file_path = get_conv_log_file_path()
     log_file_path.parent.mkdir(parents=True, exist_ok=True)
     data = {
@@ -567,7 +568,7 @@ def build_demo() -> gr.Blocks:
                     elem_id="chatbot",
                     label="LLaVA Chatbot",
                     height=550,
-                    type="messages"
+                    type="tuples"
                 )
                 with gr.Row():
                     with gr.Column(scale=8):

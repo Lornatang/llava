@@ -13,7 +13,6 @@
 # ==============================================================================
 import base64
 import dataclasses
-import re
 from enum import auto, Enum
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -137,12 +136,11 @@ class Conversation:
                     ret += role + "\n"
         return ret
 
-    def get_images(self, return_pil: bool = False, return_path: bool = False) -> List[Any]:
+    def get_images(self, return_pil: bool = False) -> List[Any]:
         """Extract images from the conversation messages.
 
         Args:
             return_pil (bool, optional): Whether to return PIL images. Defaults to ``False``.
-            return_path (bool, optional): Whether to return image paths instead of processed images. Defaults to ``False``.
 
         Returns:
             List[Any]: List of processed images.
@@ -155,11 +153,8 @@ class Conversation:
                     if type(image) != list:
                         image = [image]
                     for img in image:
-                        if isinstance(img, Image.Image):
-                            images.append(img)
-                        else:
-                            img = self.process_image(img, image_process_mode, return_pil=return_pil)
-                            images.append(img)
+                        img = self.process_image(img, image_process_mode, return_pil=return_pil)
+                        images.append(img)
         return images
 
     @staticmethod
@@ -247,45 +242,32 @@ class Conversation:
         """
         ret = []
         for i, (role, message) in enumerate(self.messages[self.offset:]):
-            if i % 2 == 0:
-                if type(message) is tuple:
-                    message, image, image_process_mode = message
-                    if type(image) != list:
-                        image = [image]
-                    if len(image) == 1:
-                        message = "<image>\n" + message.replace("<image>", "").strip()
-                    else:
-                        message = re.sub(r"(<image>)\n(?=<image>)", r"\1 ", message)
+            if isinstance(message, tuple):
+                text, image, image_process_mode = message
+                if not isinstance(image, list):
+                    image = [image]
 
-                    image_str_list = []
-                    for img in image:
-                        if isinstance(img, Image.Image):
-                            buffered = BytesIO()
-                            img.save(buffered, format="JPEG")
-                            image_base64_str = base64.b64encode(buffered.getvalue()).decode()
-                            image_str = f'<img src="data:image/jpeg;base64,{image_base64_str}" style="max-width: 256px; max-height: 256px; width: auto; height: auto; object-fit: contain;"/>'
-                            image_str_list.append(image_str)
-                        elif self.is_video_file(img):
-                            image_base64_str = self.process_image(img, "Default", return_pil=False, image_format="JPEG")
-                            image_str = f'<img src="data:image/jpeg;base64,{image_base64_str}" style="max-width: 256px; max-height: 256px; width: auto; height: auto; object-fit: contain;"/>'
-                            image_str_list.append(image_str)
-                        elif self.is_video_file(img):
-                            ret.append(((img,), None))
+                image_str_list = []
+                for img in image:
+                    if isinstance(img, Image.Image):
+                        buffered = BytesIO()
+                        img.save(buffered, format="JPEG")
+                        image_base64_str = base64.b64encode(buffered.getvalue()).decode()
+                        image_str = f'<img src="data:image/jpeg;base64,{image_base64_str}" style="max-width:256px; max-height:256px; object-fit:contain;"/>'
+                        image_str_list.append(image_str)
+                    elif self.is_image_file(img):
+                        image_base64_str = self.process_image(img, "Default", return_pil=False, image_format="JPEG")
+                        image_str = f'<img src="data:image/jpeg;base64,{image_base64_str}" style="max-width:256px; max-height:256px; object-fit:contain;"/>'
+                        image_str_list.append(image_str)
 
-                    message = message.strip()
-                    image_place_holder = ""
-                    for image_str in image_str_list:
-                        image_place_holder += f"{image_str}\n\n"
-
-                    if len(image_str_list) > 0:
-                        message = f"{image_place_holder}\n\n{message}"
-
-                    if len(message) > 0:
-                        ret.append([message, None])
-                else:
-                    ret.append([message, None])
+                content = "\n\n".join(image_str_list) + "\n\n" + text.strip()
             else:
-                ret[-1][-1] = message
+                content = str(message)
+
+            if i % 2 == 0:
+                ret.append([content, None])
+            else:
+                ret[-1][-1] = content
         return ret
 
     def copy(self) -> "Conversation":

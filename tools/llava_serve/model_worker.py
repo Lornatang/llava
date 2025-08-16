@@ -32,7 +32,7 @@ from llava.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_S
 from llava.constants import SERVER_ERROR_MSG, WORKER_HEART_BEAT_INTERVAL
 from llava.utils.checkpoint import load_pretrained
 from llava.utils.events import LOGGER
-from llava.utils.ops import KeywordsStoppingCriteria, load_image_from_base64, process_images, pretty_print_semaphore, tokenizer_image_token
+from llava.utils.ops import load_image_from_base64, process_images, pretty_print_semaphore, tokenizer_image_token
 
 global_counter = 0
 model_semaphore = None
@@ -287,15 +287,14 @@ class ModelWorker:
             image_args = {}
 
         # Tokenize and prepare input.
-        input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt").unsqueeze(0).cuda()
-        attention_mask = (input_ids != tokenizer.pad_token_id).long().cuda()
+        device = next(model.parameters()).device
+        input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt").unsqueeze(0).to(device)
+        attention_mask = (input_ids != tokenizer.pad_token_id).long().to(device)
         temperature = float(params.get("temperature", 0.2))
         top_p = float(params.get("top_p", 1.0))
         max_new_tokens = min(int(params.get("max_new_tokens", 256)), 2048)
         max_context_length = getattr(model.config, "max_position_embeddings", 2048)
         stop_str = params.get("stop", None)
-        keywords = [stop_str]
-        stopping_criteria = KeywordsStoppingCriteria(keywords, tokenizer, input_ids)
         streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True, timeout=15)
 
         max_new_tokens = min(max_new_tokens, max_context_length - input_ids.shape[-1] - num_image_tokens)
@@ -316,7 +315,6 @@ class ModelWorker:
                 max_new_tokens=max_new_tokens,
                 streamer=streamer,
                 use_cache=True,
-                stopping_criteria=[stopping_criteria],
                 **image_args,
             ),
         )
@@ -326,7 +324,7 @@ class ModelWorker:
         generated_text = original_prompt
         for new_text in streamer:
             generated_text += new_text
-            if generated_text.endswith(stop_str):
+            if isinstance(stop_str, str) and generated_text.endswith(stop_str):
                 generated_text = generated_text[: -len(stop_str)]
             yield json.dumps({"text": generated_text, "error_code": 0}).encode() + b"\0"
 
