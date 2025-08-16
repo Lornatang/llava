@@ -123,6 +123,7 @@ class ModelWorker:
             model_path: Union[str, Path],
             load_8bit: bool,
             load_4bit: bool,
+            attn_implementation: Optional[str] = None,
     ):
         """Initializes a ModelWorker by loading the pretrained model and tokenizer.
 
@@ -133,14 +134,20 @@ class ModelWorker:
             model_path (Union[str, Path]): Path to the pretrained model.
             load_8bit (bool): Whether to load the model in 8-bit precision.
             load_4bit (bool): Whether to load the model in 4-bit precision.
+            attn_implementation (Optional[str], optional): Whether to use flash_attn_implementation. Defaults to ``None``.
         """
-        self.controller = controller
-        self.worker = worker
-        self.worker_id = worker_id
-        self.model_path = model_path
+        self.controller: str = controller
+        self.worker: str = worker
+        self.worker_id: str = worker_id
+        self.model_path: Union[str, Path] = model_path
 
         LOGGER.info(f"Loading the model {self.model_path} on worker {worker_id} ...")
-        self.tokenizer, self.model, self.image_processor, self.context_length = load_pretrained(model_path, load_8bit, load_4bit)
+        self.tokenizer, self.model, self.image_processor, self.context_length = load_pretrained(
+            model_path,
+            load_8bit,
+            load_4bit,
+            attn_implementation=attn_implementation,
+        )
 
         self.register_to_controller()
         self.heart_beat_thread = threading.Thread(target=heart_beat_worker, args=(self,))
@@ -418,11 +425,11 @@ async def generate_stream(request: Request) -> StreamingResponse:
         model_semaphore = asyncio.Semaphore(opts.limit_model_concurrency)
 
     await model_semaphore.acquire()
-    worker.send_heart_beat()
+    model_worker.send_heart_beat()
 
-    generator = worker.generate_stream_gate(params)
+    generator = model_worker.generate_stream_gate(params)
     background_tasks = BackgroundTasks()
-    background_tasks.add_task(partial(release_model_semaphore, fn=worker.send_heart_beat))
+    background_tasks.add_task(partial(release_model_semaphore, fn=model_worker.send_heart_beat))
 
     return StreamingResponse(generator, background=background_tasks)
 
@@ -437,13 +444,13 @@ async def get_status(request: Request) -> Dict:
     Returns:
         Dict: A dictionary representing the worker's current status.
     """
-    return worker.get_status()
+    return model_worker.get_status()
 
 
 if __name__ == "__main__":
     opts = get_opts()
 
-    worker = ModelWorker(
+    model_worker = ModelWorker(
         opts.controller,
         opts.worker,
         str(uuid.uuid4())[:6],
