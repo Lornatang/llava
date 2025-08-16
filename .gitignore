@@ -31,10 +31,13 @@ _darcs/
 *.pkl
 *.npy
 *.pt
+*.safetensors
 *.json
 *.csv
 *.onnx
 *.engine
+*.jinja
+*.txt
 
 # image formats
 *.jpg
