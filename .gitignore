@@ -54,6 +54,14 @@ _darcs/
 *.webp
 *.WEBP
 
+# video formats
+*.mp4
+*.MP4
+*.mov
+*.MOV
+*.avi
+*.AVI
+
 # project dirs
 *.sh
 *.yaml
