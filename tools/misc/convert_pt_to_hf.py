@@ -54,6 +54,8 @@ def save_llavaprocesser(
 ) -> None:
     tokenizer, model, image_processor, _ = load_pretrained(model_path)
 
+    tokenizer.save_pretrained(output)
+    model.save_pretrained(output)
     llava_processor = LlavaProcessor(
         image_processor,
         tokenizer,
