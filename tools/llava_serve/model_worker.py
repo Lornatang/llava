@@ -92,6 +92,12 @@ def get_opts() -> argparse.Namespace:
         action="store_true",
         help="Enable 4-bit quantization for model loading.",
     )
+    parser.add_argument(
+        "--attn-implementation",
+        default=None,
+        type=str,
+        help="Attention implementation. Defaults to ``None``.",
+    )
     return parser.parse_args()
 
 
@@ -457,6 +463,7 @@ if __name__ == "__main__":
         opts.model_path,
         opts.load_8bit,
         opts.load_4bit,
+        opts.attn_implementation,
     )
     uvicorn.run(
         app,
