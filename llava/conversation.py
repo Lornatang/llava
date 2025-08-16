@@ -134,9 +134,6 @@ class Conversation:
                     ret += role + "\n" + message + self.sep + "\n"
                 else:
                     ret += role + "\n"
-        else:
-            raise ValueError(f"Invalid style: {self.sep_style}")
-
         return ret
 
     def get_images(self, return_pil: bool = False, return_path: bool = False) -> List[Any]:
