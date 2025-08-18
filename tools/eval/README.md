@@ -22,9 +22,9 @@ python ./tools/eval/convert_vqav2_to_jsonl.py -i ./results/eval/vqav2/v2_OpenEnd
 
 ```shell
 python ./tools/eval/eval_vqa_model.py \
-       --model-path ./results/stage2_finetune/llava-qwen1.5_0.5b_chat-clip_vit_large_patch14_336-stage2_coco_data \
+       --model-path ./results/stage2_finetune/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-stage2_data \
        --image-folder ./results/eval/vqav2/test2015 \
        --question-file ./results/eval/vqav2/v2_OpenEnded_mscoco_test-dev2015_questions.jsonl \
-       --answer-file ./results/eval/vqav2/v2_OpenEnded_mscoco_test-dev2015_questions/qwen1.5-0.5b-chat.jsonl \
+       --answer-file ./results/eval/vqav2/v2_OpenEnded_mscoco_test-dev2015_questions/vicuna-13b-v1.5.jsonl \
        --conv-mode qwen1_5
 ```
