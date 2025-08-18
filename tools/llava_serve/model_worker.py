@@ -452,6 +452,7 @@ if __name__ == "__main__":
         opts.worker,
         str(uuid.uuid4())[:6],
         opts.model_path,
+        opts.model_base,
         opts.load_8bit,
         opts.load_4bit,
         opts.attn_implementation,
