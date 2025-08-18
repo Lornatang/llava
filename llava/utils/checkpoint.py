@@ -32,6 +32,7 @@ __all__ = [
 
 def load_pretrained(
         model_path: str,
+        model_base:Optional[str] = None,
         load_8bit: bool = False,
         load_4bit: bool = False,
         device_map: str = "auto",
@@ -44,6 +45,7 @@ def load_pretrained(
 
     Args:
         model_path (str): Path to the pretrained model.
+        model_base (Optional[str], optional): Path to base model.
         load_8bit (bool, optional): Whether to load the model in 8-bit mode. Defaults to ``False``.
         load_4bit (bool, optional): Whether to load the model in 4-bit mode. Defaults to ``False``.
         device_map (str, optional): Device map for model loading. Defaults to ``auto``.
@@ -86,9 +88,9 @@ def load_pretrained(
                 "qwen2.5" in model_path.lower()
         ):
             lora_cfg_pretrained = LlavaQwen2Config.from_pretrained(model_path)
-            tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
+            tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=False)
             model = LlavaQwen2ForCausalLM.from_pretrained(
-                model_path,
+                model_base,
                 low_cpu_mem_usage=True,
                 config=lora_cfg_pretrained,
                 attn_implementation=attn_implementation,
@@ -96,9 +98,9 @@ def load_pretrained(
             )
         else:
             lora_cfg_pretrained = LlavaLlamaConfig.from_pretrained(model_path)
-            tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
+            tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=False)
             model = LlavaLlamaForCausalLM.from_pretrained(
-                model_path,
+                model_base,
                 low_cpu_mem_usage=True,
                 config=lora_cfg_pretrained,
                 attn_implementation=attn_implementation,

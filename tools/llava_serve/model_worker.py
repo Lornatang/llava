@@ -150,8 +150,8 @@ class ModelWorker:
         LOGGER.info(f"Loading the model {self.model_path} on worker {worker_id} ...")
         self.tokenizer, self.model, self.image_processor, self.context_length = load_pretrained(
             model_path,
-            load_8bit,
-            load_4bit,
+            load_8bit=load_8bit,
+            load_4bit=load_4bit,
             attn_implementation=attn_implementation,
         )
 

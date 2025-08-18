@@ -79,7 +79,7 @@ def cli(
 ) -> None:
     disable_torch_init()
 
-    tokenizer, model, image_processor, _ = load_pretrained(model_path, load_8bit, load_4bit)
+    tokenizer, model, image_processor, _ = load_pretrained(model_path, load_8bit=load_8bit, load_4bit=load_4bit)
 
     device = next(model.parameters()).device
     image = load_image(image_path)
