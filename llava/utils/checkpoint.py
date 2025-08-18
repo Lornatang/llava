@@ -80,7 +80,7 @@ def load_pretrained(
     if customized_config is not None:
         kwargs["config"] = customized_config
 
-    if "lora" in model_path.lower():
+    if "lora" in model_path.lower() and model_base is not None:
         LOGGER.info("Loading LLaVA from base model...")
         if (
                 "qwen1.5" in model_path.lower() or
