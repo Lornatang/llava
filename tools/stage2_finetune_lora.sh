@@ -66,7 +66,7 @@ torchrun --nproc_per_node=${NPROC_PER_NODE} \
          --lr_scheduler_type "cosine" \
          --weight_decay 0. \
          --warmup_ratio 0.03 \
-         --logging_steps 10 \
+         --logging_steps 1 \
          --bf16 True \
          --tf32 True \
          --model_max_length 32768 \

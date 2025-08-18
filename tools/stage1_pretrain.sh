@@ -55,7 +55,7 @@ torchrun --nproc_per_node=${NPROC_PER_NODE} \
          --save_strategy "steps" \
          --save_steps 1000 \
          --save_total_limit 1 \
-         --logging_steps 10 \
+         --logging_steps 1 \
          --bf16 True \
          --tf32 True \
          --model_max_length 8192 \
