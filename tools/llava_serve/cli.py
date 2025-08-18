@@ -38,10 +38,10 @@ def get_opts() -> argparse.Namespace:
         help="Path to the pretrained model or model name.",
     )
     parser.add_argument(
-        "--conv-mode",
+        "--model-base",
+        default=None,
         type=str,
-        required=True,
-        help="Conversation mode to use.",
+        help="Base model name. Defaults to ``None``.",
     )
     parser.add_argument(
         "--load-8bit",
@@ -65,21 +65,28 @@ def get_opts() -> argparse.Namespace:
         default=1024,
         help="Maximum number of new tokens to generate. Default is 1024.",
     )
+    parser.add_argument(
+        "--conv-mode",
+        type=str,
+        required=True,
+        help="Conversation mode to use.",
+    )
     return parser.parse_args()
 
 
 def cli(
         image_path: str,
         model_path: str,
-        conv_mode: str,
+        model_base: str = None,
         load_8bit: bool = False,
         load_4bit: bool = False,
         temperature: float = 0.2,
         max_new_tokens: int = 1024,
+        conv_mode: str = "vicuna_v1",
 ) -> None:
     disable_torch_init()
 
-    tokenizer, model, image_processor, _ = load_pretrained(model_path, load_8bit=load_8bit, load_4bit=load_4bit)
+    tokenizer, model, image_processor, _ = load_pretrained(model_path, model_base, load_8bit, load_4bit=load_4bit)
 
     device = next(model.parameters()).device
     image = load_image(image_path)

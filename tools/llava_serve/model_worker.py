@@ -19,7 +19,7 @@ import time
 import uuid
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Dict, Generator, Optional, Union
+from typing import Any, Callable, Dict, Generator, Optional
 
 import requests
 import torch
@@ -71,6 +71,12 @@ def get_opts() -> argparse.Namespace:
         help="Path to the model checkpoint directory. Defaults to ``./results/stage2_finetune_ov/llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-stage2_ov_data``.",
     )
     parser.add_argument(
+        "--model-base",
+        default=None,
+        type=str,
+        help="Base model name. Defaults to ``None``.",
+    )
+    parser.add_argument(
         "--limit-model-concurrency",
         default=5,
         type=int,
@@ -102,31 +108,15 @@ def get_opts() -> argparse.Namespace:
 
 
 class ModelWorker:
-    """A worker node that loads a model and communicates with a central controller.
-
-    This class is responsible for:
-      - Loading the model and tokenizer
-      - Registering itself with the controller
-      - Sending periodic heartbeats to indicate availability
-      - Reporting queue length and other status metrics
-
-    Attributes:
-        controller (str): The HTTP address of the controller service.
-        worker (str): The HTTP address of this worker.
-        worker_id (str): Unique identifier for the worker.
-        model_path (Path): Filesystem path to the model directory or file.
-        tokenizer: Tokenizer object loaded from the pretrained model.
-        model: Model object loaded from the pretrained model.
-        image_processor: Image preprocessing utility from the pretrained model.
-        context_length (int): Maximum context length supported by the model.
-    """
+    """A worker node that loads a model and communicates with a central controller."""
 
     def __init__(
             self,
             controller: str,
             worker: str,
             worker_id: str,
-            model_path: Union[str, Path],
+            model_path: str,
+            model_base: str,
             load_8bit: bool,
             load_4bit: bool,
             attn_implementation: Optional[str] = None,
@@ -137,7 +127,8 @@ class ModelWorker:
             controller (str): Controller HTTP endpoint.
             worker (str): This worker's HTTP endpoint.
             worker_id (str): Unique worker identifier.
-            model_path (Union[str, Path]): Path to the pretrained model.
+            model_path (str): Path to the pretrained model.
+            model_base (str): Path to base model.
             load_8bit (bool): Whether to load the model in 8-bit precision.
             load_4bit (bool): Whether to load the model in 4-bit precision.
             attn_implementation (Optional[str], optional): Whether to use flash_attn_implementation. Defaults to ``None``.
@@ -145,12 +136,14 @@ class ModelWorker:
         self.controller: str = controller
         self.worker: str = worker
         self.worker_id: str = worker_id
-        self.model_path: Union[str, Path] = model_path
+        self.model_path: str = model_path
+        self.model_base: str = model_base
 
         LOGGER.info(f"Loading the model {self.model_path} on worker {worker_id} ...")
         self.tokenizer, self.model, self.image_processor, self.context_length = load_pretrained(
             model_path,
-            load_8bit=load_8bit,
+            model_base,
+            load_8bit,
             load_4bit=load_4bit,
             attn_implementation=attn_implementation,
         )
