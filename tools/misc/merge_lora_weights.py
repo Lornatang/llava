@@ -41,7 +41,7 @@ def merge_lora_weights(
         model_base: str,
         save_model_path: str,
 ) -> None:
-    tokenizer, model, image_processor, context_len = load_pretrained(model_path, model_base, device_map='cpu')
+    tokenizer, model, image_processor, _ = load_pretrained(model_path, model_base)
     model.save_pretrained(save_model_path)
     tokenizer.save_pretrained(save_model_path)
 
