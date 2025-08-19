@@ -529,7 +529,7 @@ def build_demo() -> gr.Blocks:
 
                 gr.Examples(
                     examples=[
-                        [f"./assets/0.jpg", "What's in this image?"],
+                        [f"./assets/0.jpg", "Who and what activity can you see in the snowy scene?"],
                         [f"./assets/1.jpg", "What are the things I should be cautious about when I visit here?"],
                     ],
                     inputs=[imagebox, textbox],
