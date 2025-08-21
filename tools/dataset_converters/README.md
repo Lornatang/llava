@@ -22,6 +22,6 @@ img2dataset --url_list ./datasets/sbu-captions-all.json --input_format "json" --
 ### Generating image-text alignment data based on [BLIP2](https://arxiv.org/abs/2301.12597v3)
 
 ```shell
-pip install ujson
-python ./tools/dataset_converters/generate_meta_json_from_webdataset.py -i ./datasets/sbucaptions -o sbucaptions_meta.json --max-workers 64
+pip install orjson
+python ./tools/dataset_converters/convert_webdataset_to_meta.py -i ./datasets/sbucaptions -o sbucaptions_meta.json --max-workers 64
 ```
