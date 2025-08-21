@@ -107,6 +107,7 @@ def process_single_file(folder_path: Union[Path, str], json_file: Union[Path, st
             "id": data.get("key", ""),
             "image": f"{folder_path.name}/{image_file.name}",
             "caption": data.get("caption", ""),
+            "blip_caption": data.get("blip_caption", ""),
             "url": data.get("url", "")
         }
     except Exception as e:

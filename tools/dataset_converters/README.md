@@ -23,5 +23,6 @@ img2dataset --url_list ./datasets/sbu-captions-all.json --input_format "json" --
 
 ```shell
 pip install orjson
+python ./tools/dataset_converters/generate_blip_caption_to_meta_json.py -i ./datasets/sbucaptions
 python ./tools/dataset_converters/convert_webdataset_to_meta.py -i ./datasets/sbucaptions -o sbucaptions_meta.json --max-workers 64
 ```
