@@ -44,12 +44,12 @@ def get_opts() -> argparse.Namespace:
         help="Base model name. Defaults to ``None``.",
     )
     parser.add_argument(
-        "--load-8bit",
+        "--load-in-8bit",
         action="store_true",
         help="Whether to load the model in 8-bit mode.",
     )
     parser.add_argument(
-        "--load-4bit",
+        "--load-in-4bit",
         action="store_true",
         help="Whether to load the model in 4-bit mode.",
     )
@@ -78,15 +78,15 @@ def cli(
         image_path: str,
         model_path: str,
         model_base: str = None,
-        load_8bit: bool = False,
-        load_4bit: bool = False,
+        load_in_4bit: bool = False,
+        load_in_8bit: bool = False,
         temperature: float = 0.2,
         max_new_tokens: int = 1024,
         conv_mode: str = "vicuna_v1",
 ) -> None:
     disable_torch_init()
 
-    tokenizer, model, image_processor, _ = load_pretrained(model_path, model_base, load_8bit, load_4bit=load_4bit)
+    tokenizer, model, image_processor, _ = load_pretrained(model_path, model_base, load_in_4bit, load_in_8bit=load_in_8bit)
 
     device = next(model.parameters()).device
     image = load_image(image_path)

@@ -89,14 +89,14 @@ def get_opts() -> argparse.Namespace:
         help="Interval in seconds between streaming outputs.",
     )
     parser.add_argument(
-        "--load-8bit",
-        action="store_true",
-        help="Enable 8-bit quantization for model loading.",
-    )
-    parser.add_argument(
-        "--load-4bit",
+        "--load-in-4bit",
         action="store_true",
         help="Enable 4-bit quantization for model loading.",
+    )
+    parser.add_argument(
+        "--load-in-8bit",
+        action="store_true",
+        help="Enable 8-bit quantization for model loading.",
     )
     parser.add_argument(
         "--attn-implementation",
@@ -117,8 +117,8 @@ class ModelWorker:
             worker_id: str,
             model_path: str,
             model_base: str,
-            load_8bit: bool,
-            load_4bit: bool,
+            load_in_4bit: bool,
+            load_in_8bit: bool,
             attn_implementation: Optional[str] = None,
     ):
         """Initializes a ModelWorker by loading the pretrained model and tokenizer.
@@ -129,8 +129,8 @@ class ModelWorker:
             worker_id (str): Unique worker identifier.
             model_path (str): Path to the pretrained model.
             model_base (str): Path to base model.
-            load_8bit (bool): Whether to load the model in 8-bit precision.
-            load_4bit (bool): Whether to load the model in 4-bit precision.
+            load_in_4bit (bool): Whether to load the model in 4-bit precision.
+            load_in_8bit (bool): Whether to load the model in 8-bit precision.
             attn_implementation (Optional[str], optional): Whether to use flash_attn_implementation. Defaults to ``None``.
         """
         self.controller: str = controller
@@ -143,8 +143,8 @@ class ModelWorker:
         self.tokenizer, self.model, self.image_processor, self.context_length = load_pretrained(
             model_path,
             model_base,
-            load_8bit,
-            load_4bit=load_4bit,
+            load_in_4bit,
+            load_in_8bit=load_in_8bit,
             attn_implementation=attn_implementation,
         )
 
@@ -453,8 +453,8 @@ if __name__ == "__main__":
         str(uuid.uuid4())[:6],
         opts.model_path,
         opts.model_base,
-        opts.load_8bit,
-        opts.load_4bit,
+        opts.load_in_4bit,
+        opts.load_in_8bit,
         opts.attn_implementation,
     )
     uvicorn.run(

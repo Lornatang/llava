@@ -33,8 +33,8 @@ __all__ = [
 def load_pretrained(
         model_path: str,
         model_base:Optional[str] = None,
-        load_8bit: bool = False,
-        load_4bit: bool = False,
+        load_in_4bit: bool = False,
+        load_in_8bit: bool = False,
         device_map: str = "auto",
         torch_dtype: str = "float16",
         attn_implementation: Optional[str] = None,
@@ -46,8 +46,8 @@ def load_pretrained(
     Args:
         model_path (str): Path to the pretrained model.
         model_base (Optional[str], optional): Path to base model.
-        load_8bit (bool, optional): Whether to load the model in 8-bit mode. Defaults to ``False``.
-        load_4bit (bool, optional): Whether to load the model in 4-bit mode. Defaults to ``False``.
+                load_in_4bit (bool, optional): Whether to load the model in 4-bit mode. Defaults to ``False``.
+        load_in_8bit (bool, optional): Whether to load the model in 8-bit mode. Defaults to ``False``.
         device_map (str, optional): Device map for model loading. Defaults to ``auto``.
         torch_dtype (str, optional): Data type for the model. Defaults to ``float16``.
         attn_implementation (Optional[str], optional): Attention implementation to use. Defaults to ``None``.
@@ -59,16 +59,16 @@ def load_pretrained(
     """
     kwargs["device_map"] = device_map
 
-    if load_8bit:
-        kwargs["quantization_config"] = BitsAndBytesConfig(
-            load_in_8bit=True,
-        )
-    elif load_4bit:
+    if load_in_4bit:
         kwargs["quantization_config"] = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_compute_dtype=torch.float16,
             bnb_4bit_use_double_quant=True,
             bnb_4bit_quant_type="nf4",
+        )
+    elif load_in_8bit:
+        kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_8bit=True,
         )
     elif torch_dtype == "float16":
         kwargs["torch_dtype"] = torch.float16
