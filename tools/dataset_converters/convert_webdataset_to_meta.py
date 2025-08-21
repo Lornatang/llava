@@ -46,12 +46,6 @@ def get_opts() -> argparse.Namespace:
         type=int,
         help="Number of folders to process per batch. Defaults to 10.",
     )
-    parser.add_argument(
-        "--max-workers",
-        default=8,
-        type=int,
-        help="Number of threads per folder for concurrent processing. Defaults to 8.",
-    )
     return parser.parse_args()
 
 
@@ -77,19 +71,19 @@ def load_existing_results(output_file: Union[Path, str]) -> List[Any]:
     return []
 
 
-def process_folder(folder_path: Union[Path, str], max_workers: int = 8) -> List[Dict[str, Any]]:
+def process_folder(folder_path: Union[Path, str]) -> List[Dict[str, Any]]:
     folder_path = Path(folder_path)
     results: List[Dict[str, Any]] = []
     json_files: List[Path] = [entry for entry in folder_path.iterdir() if entry.is_file() and entry.suffix == ".json"]
     if not json_files:
         return results
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with ThreadPoolExecutor() as executor:
         futures = [executor.submit(process_single_file, folder_path, json_file) for json_file in json_files]
         for future in futures:
-            res = future.result()
-            if res:
-                results.append(res)
+            result = future.result()
+            if result:
+                results.append(result)
     return results
 
 
@@ -138,7 +132,7 @@ def generate_meta_json_from_webdataset(
         for folder in batch:
             folder_name = folder.name
             print(f"Processing folder {folder_name}...")
-            folder_results = process_folder(folder, max_workers=max_workers)
+            folder_results = process_folder(folder)
             if folder_results:
                 all_results.extend(folder_results)
                 print(f"Folder {folder_name} completed, added {len(folder_results)} records.")
@@ -165,7 +159,6 @@ def main() -> None:
         opts.output,
         opts.status_file,
         batch_size=opts.batch_size,
-        max_workers=opts.max_workers,
     )
 
 
