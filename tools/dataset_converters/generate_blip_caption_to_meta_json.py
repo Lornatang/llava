@@ -1,7 +1,19 @@
-# Copyright (c) AlphaBetter. All rights reserved.
-import ujson
+# Copyright Lornatang. All Rights Reserved.
+# Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
 from pathlib import Path
 
+import orjson
 import torch
 from PIL import Image
 from transformers import BitsAndBytesConfig, Blip2Processor, Blip2ForConditionalGeneration
@@ -9,20 +21,22 @@ from transformers import BitsAndBytesConfig, Blip2Processor, Blip2ForConditional
 
 def generate_meta_with_blip_incremental(root_dir: Path, output_file: Path) -> None:
     # Load BLIP model
-    processor = Blip2Processor.from_pretrained("./results/pretrained_models/Salesforce/blip2-opt-2.7b", use_fast=True)
+    processor = Blip2Processor.from_pretrained(
+        "./results/pretrained_models/Salesforce/blip2-opt-2.7b", use_fast=True
+    )
     kwargs = {
-        "quantization_config": BitsAndBytesConfig(
-            load_in_8bit=True,
-        ),
+        "quantization_config": BitsAndBytesConfig(load_in_8bit=True),
         "device_map": "auto",
         "offload_folder": "offload"
     }
-    model = Blip2ForConditionalGeneration.from_pretrained("./results/pretrained_models/Salesforce/blip2-opt-2.7b", **kwargs)
+    model = Blip2ForConditionalGeneration.from_pretrained(
+        "./results/pretrained_models/Salesforce/blip2-opt-2.7b", **kwargs
+    )
 
     # Load existing results (if any)
     if output_file.exists():
-        with open(output_file, "r", encoding="utf-8") as f:
-            existing_records = {rec["id"]: rec for rec in ujson.load(f)}
+        with output_file.open("rb") as f:
+            existing_records = {rec["id"]: rec for rec in orjson.loads(f.read())}
         print(f"🔄 Loaded {len(existing_records)} existing records.")
     else:
         existing_records = {}
@@ -34,8 +48,8 @@ def generate_meta_with_blip_incremental(root_dir: Path, output_file: Path) -> No
             continue
 
         for json_file in subdir.glob("*.json"):
-            with open(json_file, "r", encoding="utf-8") as f:
-                meta = ujson.load(f)
+            with json_file.open("rb") as f:
+                meta = orjson.loads(f.read())
 
             img_file = json_file.with_suffix(".jpg")
             if not img_file.exists():
@@ -72,15 +86,18 @@ def generate_meta_with_blip_incremental(root_dir: Path, output_file: Path) -> No
                 record["blip_caption"] = None
 
             existing_records[sample_id] = record
-            # Write back incrementally (避免断电/中断丢失)
-            with open(output_file, "w", encoding="utf-8") as f:
-                ujson.dump(list(existing_records.values()), f, ensure_ascii=False, indent=2, escape_forward_slashes=False)
 
+            # Write back incrementally
+            with output_file.open("wb") as f:
+                f.write(orjson.dumps(
+                    list(existing_records.values()),
+                    option=orjson.OPT_INDENT_2
+                ))
 
     print(f"✅ Finished! Total {len(existing_records)} records saved to {output_file}")
 
 
 if __name__ == "__main__":
-    root_dir = Path("/mnt/data/larry/datasets/open_data/sbucaptions")  # 数据集的根目录
+    root_dir = Path("/mnt/data/larry/datasets/open_data/sbucaptions")
     output_file = Path("sbucaptions_meta.json")
     generate_meta_with_blip_incremental(root_dir, output_file)
