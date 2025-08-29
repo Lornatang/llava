@@ -25,7 +25,6 @@ MODEL_PATH="./results/stage_1_5_finetune/llava-vicuna_13b_v1.5-clip_vit_large_pa
 VISION_MODEL_PATH="./results/pretrained_models/openai/clip-vit-large-patch14-336"
 RUN_NAME="llava-vicuna_13b_v1.5-clip_vit_large_patch14_336-stage2_si_data"
 ATTN_IMPLEMENTATION="sdpa"  # "flash_attention_2" or "flash_attention_3" or "sdpa"
-TORCH_COMPILE_BACKEND="inductor"  # "inductor" or "eager"
 DEEPSPEED_CONFIG="./tools/zero3.json"
 
 # Training Hyperparameters.
@@ -71,5 +70,4 @@ torchrun --nproc_per_node=${NPROC_PER_NODE} \
          --run_name ${RUN_NAME} \
          --attn_implementation ${ATTN_IMPLEMENTATION} \
          --torch_compile True \
-         --torch_compile_backend ${TORCH_COMPILE_BACKEND} \
          --deepspeed ${DEEPSPEED_CONFIG}
