@@ -11,12 +11,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-import math
 import random
 import re
 from abc import ABC, abstractmethod
 from typing import Any, List, Optional, Tuple, Union
 
+import math
 import torch
 from torch import nn
 from torch.nn import functional as F_torch
@@ -126,6 +126,7 @@ class LlavaMetaModel:
             if "unpad" in mm_patch_merge_type:
                 embed_std = 1 / torch.sqrt(torch.tensor(self.config.hidden_size, dtype=self.dtype))
                 self.image_newline = nn.Parameter(torch.randn(self.config.hidden_size, dtype=self.dtype) * embed_std)
+                # self.image_newline.persist = True
         else:
             # In case it is frozen by LoRA.
             for p in self.mm_projector.parameters():
@@ -402,7 +403,6 @@ class LlavaMetaForCausalLM(ABC):
                             image_feature = self.add_token_per_frame(image_feature)
 
                             new_image_features.append(image_feature.flatten(0, 1))
-
                         elif mm_newline_position == "one_token":
                             # one-token
                             image_feature = image_feature.flatten(0, 1)
@@ -457,15 +457,24 @@ class LlavaMetaForCausalLM(ABC):
                             if times > 1.1:
                                 image_feature = image_feature[None]
                                 image_feature = F_torch.interpolate(image_feature, [int(h // times), int(w // times)], mode="bilinear")[0]
-                            image_feature = torch.cat((image_feature, self.model.image_newline[:, None, None].expand(*image_feature.shape[:-1], 1).to(
-                                image_feature.device)), dim=-1)
+                            image_feature = torch.cat(
+                                (
+                                    image_feature,
+                                    self.model.image_newline[:, None, None].expand(*image_feature.shape[:-1], 1).to(image_feature.device),
+                                ), dim=-1,
+                            )
                             image_feature = image_feature.flatten(1, 2).transpose(0, 1)
+                        # ... existing code ...
                         elif "unpad" in mm_patch_merge_type:
                             image_feature = image_feature.permute(4, 0, 2, 1, 3).contiguous()
                             image_feature = image_feature.flatten(1, 2).flatten(2, 3)
                             image_feature = unpad_image(image_feature, image_sizes[image_idx])
-                            image_feature = torch.cat((image_feature, self.model.image_newline[:, None, None].expand(*image_feature.shape[:-1], 1).to(
-                                image_feature.device)), dim=-1)
+                            image_feature = torch.cat(
+                                (
+                                    image_feature,
+                                    self.model.image_newline[:, None, None].expand(*image_feature.shape[:-1], 1).to(image_feature.device),
+                                ), dim=-1,
+                            )
                             image_feature = image_feature.flatten(1, 2).transpose(0, 1)
                         else:
                             image_feature = image_feature.permute(0, 2, 1, 3, 4).contiguous()
@@ -473,12 +482,22 @@ class LlavaMetaForCausalLM(ABC):
                         if "nobase" in mm_patch_merge_type:
                             pass
                         else:
-                            image_feature = torch.cat((base_image_feature, image_feature), dim=0)
+                            image_feature = torch.cat(
+                                (
+                                    base_image_feature,
+                                    image_feature,
+                                ), dim=0,
+                            )
                         new_image_features.append(image_feature)
                     else:  # single image operations.
                         image_feature = image_feature[0]
                         if "unpad" in mm_patch_merge_type:
-                            image_feature = torch.cat((image_feature, self.model.image_newline[None]), dim=0)
+                            image_feature = torch.cat(
+                                (
+                                    image_feature,
+                                    self.model.image_newline[None],
+                                ), dim=0,
+                            )
 
                         new_image_features.append(image_feature)
                 image_features = new_image_features
