@@ -126,7 +126,6 @@ class LlavaMetaModel:
             if "unpad" in mm_patch_merge_type:
                 embed_std = 1 / torch.sqrt(torch.tensor(self.config.hidden_size, dtype=self.dtype))
                 self.image_newline = nn.Parameter(torch.randn(self.config.hidden_size, dtype=self.dtype) * embed_std)
-                # self.image_newline.persist = True
         else:
             # In case it is frozen by LoRA.
             for p in self.mm_projector.parameters():
