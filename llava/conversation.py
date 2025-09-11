@@ -23,9 +23,9 @@ from llava.utils.ops import convert_expand_to_square
 
 __all__ = [
     "SeparatorStyle", "Conversation",
-    "conv_llava_plain", "conv_llava_vicuna_v1", "conv_llava_vicuna_v1_mmtag", "conv_llava_llama", "conv_llava_mistral_instruct", "conv_llava_qwen1_5",
-    "conv_llava_qwen2", "conv_llava_qwen2_5", "conv_vicuna_v1", "conv_llama", "conv_mistral_instruct", "conv_qwen1_5", "conv_qwen2", "conv_qwen2_5",
-    "conv_templates", "default_conversation",
+    "conv_llava_plain", "conv_llava_vicuna_v1", "conv_llava_vicuna_v1_mmtag", "conv_llava_llama", "conv_llava_mistral_direct",
+    "conv_llava_mistral_instruct", "conv_llava_qwen1_5", "conv_llava_qwen2", "conv_llava_qwen2_5", "conv_vicuna_v1", "conv_llama",
+    "conv_mistral_direct", "conv_mistral_instruct", "conv_qwen1_5", "conv_qwen2", "conv_qwen2_5", "conv_templates", "default_conversation",
 ]
 
 
@@ -34,6 +34,7 @@ class SeparatorStyle(Enum):
     PLAIN = auto()  # Text style.
     VICUNA_V1 = auto()  # Vicuna-V1 style.
     LLAMA = auto()  # Llama style.
+    MPT = auto()  # MPT style.
     CHATML = auto()  # ChatML/Qwen style.
 
 
@@ -125,6 +126,15 @@ class Conversation:
                 else:
                     ret += ""
             ret = ret.lstrip(self.sep)
+        elif self.sep_style == SeparatorStyle.MPT:  # MPT style.
+            ret = self.system_message + self.sep
+            for role, message in messages:
+                if message:
+                    if type(message) is tuple:
+                        message, _, _ = message
+                    ret += role + message + self.sep
+                else:
+                    ret += role
         elif self.sep_style == SeparatorStyle.CHATML:  # ChatML/Qwen style.
             ret = "" if self.system_message == "" else self.system_message + self.sep + "\n"
             for role, message in messages:
@@ -411,6 +421,21 @@ conv_llava_mistral_instruct = Conversation(
     skip_next=False,
     version="llava_mistral_instruct",
 )
+conv_llava_mistral_direct = Conversation(
+    system_message="<|im_start|>system\nAnswer the questions.",
+    roles=("<|im_start|>user\n", "<|im_start|>assistant\n"),
+    messages=[],
+    offset=0,
+    sep_style=SeparatorStyle.MPT,
+    sep="<|im_end|>",
+    sep2=None,
+    tokenizer_id="",
+    tokenizer=None,
+    stop_str=None,
+    stop_token_ids=None,
+    skip_next=False,
+    version="llava_mistral_direct",
+)
 conv_llava_qwen1_5 = Conversation(
     system_message="<|im_start|>system\nYou are a helpful assistant.",
     roles=("<|im_start|>user", "<|im_start|>assistant"),
@@ -491,6 +516,21 @@ conv_llama = Conversation(
     skip_next=False,
     version="llama",
 )
+conv_mistral_direct = Conversation(
+    system_message="<|im_start|>system\nAnswer the questions.",
+    roles=("<|im_start|>user\n", "<|im_start|>assistant\n"),
+    messages=[],
+    offset=0,
+    sep_style=SeparatorStyle.MPT,
+    sep="<|im_end|>",
+    sep2=None,
+    tokenizer_id="",
+    tokenizer=None,
+    stop_str=None,
+    stop_token_ids=None,
+    skip_next=False,
+    version="mistral_direct",
+)
 conv_mistral_instruct = Conversation(
     system_message="",
     roles=("USER", "ASSISTANT"),
@@ -558,6 +598,7 @@ conv_templates = {
     "llava_vicuna_v1": conv_llava_vicuna_v1,
     "llava_vicuna_v1_mmtag": conv_llava_vicuna_v1_mmtag,
     "llava_llama": conv_llava_llama,
+    "llava_mistral_direct": conv_llava_mistral_direct,
     "llava_mistral_instruct": conv_llava_mistral_instruct,
     "llava_qwen1_5": conv_llava_qwen1_5,
     "llava_qwen2": conv_llava_qwen2,
@@ -566,6 +607,7 @@ conv_templates = {
     # finetune.
     "vicuna_v1": conv_vicuna_v1,
     "llama": conv_llama,
+    "mistral_direct": conv_mistral_direct,
     "mistral_instruct": conv_mistral_instruct,
     "qwen1_5": conv_qwen1_5,
     "qwen2": conv_qwen2,

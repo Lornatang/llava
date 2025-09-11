@@ -377,6 +377,8 @@ def http_bot(
     if len(state.messages) == state.offset + 2:
         if "llama" in model_selector.lower():
             template_name = "llama"
+        elif "hermes" in model_selector.lower():
+            template_name = "mistral_direct"
         elif "mistral" in model_selector.lower():
             if "orca" in model_selector.lower():
                 template_name = "mistral_orca"

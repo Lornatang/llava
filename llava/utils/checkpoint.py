@@ -95,6 +95,15 @@ def load_pretrained(
                 attn_implementation=attn_implementation,
                 **kwargs,
             )
+        elif "mistral" in model_path.lower():
+            lora_cfg_pretrained = LlavaMistralConfig.from_pretrained(model_path)
+            model = LlavaMistralForCausalLM.from_pretrained(
+                model_base,
+                low_cpu_mem_usage=True,
+                config=lora_cfg_pretrained,
+                attn_implementation=attn_implementation,
+                **kwargs,
+            )
         elif (
                 "qwen1.5" in model_path.lower() or
                 "qwen2" in model_path.lower() or
@@ -220,7 +229,12 @@ def load_pretrained(
                         attn_implementation=attn_implementation,
                         **kwargs,
                     )
-        else:
+        elif (
+                "vicuna" in model_path.lower()
+                or "llama" in model_path.lower()
+                or "yi" in model_path.lower()
+                or "nous-hermes" in model_path.lower()
+        ):
             if customized_config is None:
                 llava_cfg = LlavaLlamaConfig.from_pretrained(model_path)
             else:
@@ -238,6 +252,8 @@ def load_pretrained(
                 config=llava_cfg,
                 **kwargs,
             )
+        else:
+            raise ValueError(f"Model {model_path.lower()} not supported")
 
     mm_use_im_start_end = getattr(model.config, "mm_use_im_start_end", False)
     mm_use_im_patch_token = getattr(model.config, "mm_use_im_patch_token", True)
