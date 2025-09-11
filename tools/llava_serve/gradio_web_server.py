@@ -375,13 +375,7 @@ def http_bot(
 
     # Initialize conversation template if new.
     if len(state.messages) == state.offset + 2:
-        if "qwen2.5" in model_selector.lower():
-            template_name = "qwen2_5"
-        elif "qwen2" in model_selector.lower():
-            template_name = "qwen2"
-        elif "qwen1.5" in model_selector.lower():
-            template_name = "qwen1_5"
-        elif "llama" in model_selector.lower():
+        if "llama" in model_selector.lower():
             template_name = "llama"
         elif "mistral" in model_selector.lower() or "mixtral" in model_selector.lower():
             if "orca" in model_selector.lower():
@@ -390,6 +384,12 @@ def http_bot(
                 template_name = "mistral_direct"
             else:
                 template_name = "mistral_instruct"
+        elif "qwen2.5" in model_selector.lower():
+            template_name = "qwen2_5"
+        elif "qwen2" in model_selector.lower():
+            template_name = "qwen2"
+        elif "qwen1.5" in model_selector.lower():
+            template_name = "qwen1_5"
         else:
             template_name = "vicuna_v1"
         new_state = conv_templates[template_name].copy()
