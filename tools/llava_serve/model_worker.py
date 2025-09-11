@@ -302,7 +302,7 @@ class ModelWorker:
             kwargs=dict(
                 inputs=input_ids,
                 attention_mask=attention_mask,
-                do_sample=True,
+                do_sample=True if temperature > 0.001 else False,
                 temperature=temperature,
                 top_p=top_p,
                 max_new_tokens=max_new_tokens,
