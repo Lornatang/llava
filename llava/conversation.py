@@ -558,7 +558,7 @@ conv_templates = {
     "llava_vicuna_v1": conv_llava_vicuna_v1,
     "llava_vicuna_v1_mmtag": conv_llava_vicuna_v1_mmtag,
     "llava_llama": conv_llava_llama,
-    "llava_mistral": conv_llava_mistral_instruct,
+    "llava_mistral_instruct": conv_llava_mistral_instruct,
     "llava_qwen1_5": conv_llava_qwen1_5,
     "llava_qwen2": conv_llava_qwen2,
     "llava_qwen2_5": conv_llava_qwen2_5,
@@ -566,7 +566,7 @@ conv_templates = {
     # finetune.
     "vicuna_v1": conv_vicuna_v1,
     "llama": conv_llama,
-    "mistral": conv_mistral_instruct,
+    "mistral_instruct": conv_mistral_instruct,
     "qwen1_5": conv_qwen1_5,
     "qwen2": conv_qwen2,
     "qwen2_5": conv_qwen2_5,
