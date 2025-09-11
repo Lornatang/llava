@@ -21,7 +21,9 @@ from torch import nn
 from transformers import AutoTokenizer, BitsAndBytesConfig
 
 from llava.constants import DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
-from llava.models.llm import LlavaLlamaConfig, LlavaLlamaForCausalLM, LlavaQwen2Config, LlavaQwen2ForCausalLM
+from llava.models.llm import (
+    LlavaLlamaConfig, LlavaLlamaForCausalLM, LlavaMistralConfig, LlavaMistralForCausalLM, LlavaQwen2Config, LlavaQwen2ForCausalLM,
+)
 from .events import LOGGER
 from .ops import get_mm_adapter_state_maybe_zero_3
 
@@ -84,22 +86,22 @@ def load_pretrained(
         LOGGER.info("Loading LLaVA from base model...")
         tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=True)
 
-        if (
-                "qwen1.5" in model_path.lower() or
-                "qwen2" in model_path.lower() or
-                "qwen2.5" in model_path.lower()
-        ):
-            lora_cfg_pretrained = LlavaQwen2Config.from_pretrained(model_path)
-            model = LlavaQwen2ForCausalLM.from_pretrained(
+        if "llama" in model_path.lower():
+            lora_cfg_pretrained = LlavaLlamaConfig.from_pretrained(model_path)
+            model = LlavaLlamaForCausalLM.from_pretrained(
                 model_base,
                 low_cpu_mem_usage=True,
                 config=lora_cfg_pretrained,
                 attn_implementation=attn_implementation,
                 **kwargs,
             )
-        elif "llama" in model_path.lower():
-            lora_cfg_pretrained = LlavaLlamaConfig.from_pretrained(model_path)
-            model = LlavaLlamaForCausalLM.from_pretrained(
+        elif (
+                "qwen1.5" in model_path.lower() or
+                "qwen2" in model_path.lower() or
+                "qwen2.5" in model_path.lower()
+        ):
+            lora_cfg_pretrained = LlavaQwen2Config.from_pretrained(model_path)
+            model = LlavaQwen2ForCausalLM.from_pretrained(
                 model_base,
                 low_cpu_mem_usage=True,
                 config=lora_cfg_pretrained,
@@ -137,7 +139,41 @@ def load_pretrained(
     else:
         tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True)
 
-        if (
+        if "llama" in model_path.lower():
+            if customized_config is None:
+                llava_cfg = LlavaLlamaConfig.from_pretrained(model_path)
+            else:
+                llava_cfg = customized_config
+
+            if overwrite_config is not None:
+                LOGGER.info(f"Overwriting config with {overwrite_config}.")
+                for k, v in overwrite_config.items():
+                    setattr(llava_cfg, k, v)
+
+            model = LlavaLlamaForCausalLM.from_pretrained(
+                model_path,
+                low_cpu_mem_usage=True,
+                attn_implementation=attn_implementation,
+                config=llava_cfg,
+                **kwargs,
+            )
+        elif "mistral" in model_path.lower():
+            if customized_config is None:
+                llava_cfg = LlavaMistralConfig.from_pretrained(model_path)
+            else:
+                llava_cfg = customized_config
+
+            if overwrite_config is not None:
+                LOGGER.info(f"Overwriting config with {overwrite_config}.")
+                for k, v in overwrite_config.items():
+                    setattr(llava_cfg, k, v)
+            model = LlavaMistralForCausalLM.from_pretrained(
+                model_path,
+                low_cpu_mem_usage=True,
+                attn_implementation=attn_implementation,
+                **kwargs,
+            )
+        elif (
                 "qwen1.5" in model_path.lower() or
                 "qwen2" in model_path.lower() or
                 "qwen2.5" in model_path.lower()
@@ -184,24 +220,6 @@ def load_pretrained(
                         attn_implementation=attn_implementation,
                         **kwargs,
                     )
-        elif "llama" in model_path.lower():
-            if customized_config is None:
-                llava_cfg = LlavaLlamaConfig.from_pretrained(model_path)
-            else:
-                llava_cfg = customized_config
-
-            if overwrite_config is not None:
-                LOGGER.info(f"Overwriting config with {overwrite_config}.")
-                for k, v in overwrite_config.items():
-                    setattr(llava_cfg, k, v)
-
-            model = LlavaLlamaForCausalLM.from_pretrained(
-                model_path,
-                low_cpu_mem_usage=True,
-                attn_implementation=attn_implementation,
-                config=llava_cfg,
-                **kwargs,
-            )
         else:
             if customized_config is None:
                 llava_cfg = LlavaLlamaConfig.from_pretrained(model_path)

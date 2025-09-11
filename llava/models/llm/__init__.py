@@ -12,4 +12,5 @@
 # limitations under the License.
 # ==============================================================================
 from .llama import LlavaLlamaConfig, LlavaLlamaModel, LlavaLlamaForCausalLM
+from .mistral import LlavaMistralConfig, LlavaMistralModel, LlavaMistralForCausalLM
 from .qwen2 import LlavaQwen2Config, LlavaQwen2Model, LlavaQwen2ForCausalLM

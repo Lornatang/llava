@@ -383,6 +383,13 @@ def http_bot(
             template_name = "qwen1_5"
         elif "llama" in model_selector.lower():
             template_name = "llama"
+        elif "mistral" in model_selector.lower() or "mixtral" in model_selector.lower():
+            if "orca" in model_selector.lower():
+                template_name = "mistral_orca"
+            elif "hermes" in model_selector.lower():
+                template_name = "mistral_direct"
+            else:
+                template_name = "mistral_instruct"
         else:
             template_name = "vicuna_v1"
         new_state = conv_templates[template_name].copy()
@@ -550,7 +557,7 @@ def build_demo() -> gr.Blocks:
                     top_p = gr.Slider(
                         minimum=0.0,
                         maximum=1.0,
-                        value=0.7,
+                        value=0.9,
                         step=0.1,
                         interactive=True,
                         label="Top P",
