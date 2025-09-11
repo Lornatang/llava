@@ -135,7 +135,7 @@ class Conversation:
                     ret += role + message + self.sep
                 else:
                     ret += role
-        elif self.sep_style == SeparatorStyle.CHATML:  # ChatML/Qwen style.
+        elif self.sep_style == SeparatorStyle.CHATML:  # ChatML/Qwen/Hermes style.
             ret = "" if self.system_message == "" else self.system_message + self.sep + "\n"
             for role, message in messages:
                 if message:
@@ -406,6 +406,29 @@ conv_llava_llama = Conversation(
     skip_next=False,
     version="llava_llama",
 )
+conv_llava_mistral_direct = Conversation(
+    system_message="You are a helpful, intelligent assistant AI named 'Hermes', a conversational chatbot that can follow instructions, "
+                   "converse with the user, and perform a variety of tasks, including tasks on knowledge, reasoning, mathematics, and code. "
+                   "Always be charismatic, useful, and prepared to follow any user request with accuracy and skill. "
+                   "You should respond with high quality, fluent, and detailed responses. "
+                   "Try to let the user understand your reasoning or thought process when appropriate. "
+                   "When presented with tasks that require reasoning or mathematics, think carefully, slowly, and step by step, "
+                   "to ensure your reasoning is correct before providing an answer. "
+                   "Utilize the 'Examples' section to assist you in performing the task. "
+                   "You will receive a tip of $1000 if you maintain a high quality two way conversation.",
+    roles=("<|im_start|>user", "<|im_start|>assistant"),
+    messages=[],
+    offset=0,
+    sep_style=SeparatorStyle.MPT,
+    sep="<|im_end|>",
+    sep2=None,
+    tokenizer_id="",
+    tokenizer=None,
+    stop_str=None,
+    stop_token_ids=None,
+    skip_next=False,
+    version="llava_mistral_direct",
+)
 conv_llava_mistral_instruct = Conversation(
     system_message="",
     roles=("USER", "ASSISTANT"),
@@ -420,21 +443,6 @@ conv_llava_mistral_instruct = Conversation(
     stop_token_ids=None,
     skip_next=False,
     version="llava_mistral_instruct",
-)
-conv_llava_mistral_direct = Conversation(
-    system_message="<|im_start|>system\nAnswer the questions.",
-    roles=("<|im_start|>user\n", "<|im_start|>assistant\n"),
-    messages=[],
-    offset=0,
-    sep_style=SeparatorStyle.MPT,
-    sep="<|im_end|>",
-    sep2=None,
-    tokenizer_id="",
-    tokenizer=None,
-    stop_str=None,
-    stop_token_ids=None,
-    skip_next=False,
-    version="llava_mistral_direct",
 )
 conv_llava_qwen1_5 = Conversation(
     system_message="<|im_start|>system\nYou are a helpful assistant.",
@@ -517,11 +525,19 @@ conv_llama = Conversation(
     version="llama",
 )
 conv_mistral_direct = Conversation(
-    system_message="<|im_start|>system\nAnswer the questions.",
-    roles=("<|im_start|>user\n", "<|im_start|>assistant\n"),
+    system_message="You are a helpful, intelligent assistant AI named 'Hermes', a conversational chatbot that can follow instructions, "
+                   "converse with the user, and perform a variety of tasks, including tasks on knowledge, reasoning, mathematics, and code. "
+                   "Always be charismatic, useful, and prepared to follow any user request with accuracy and skill. "
+                   "You should respond with high quality, fluent, and detailed responses. "
+                   "Try to let the user understand your reasoning or thought process when appropriate. "
+                   "When presented with tasks that require reasoning or mathematics, think carefully, slowly, and step by step, "
+                   "to ensure your reasoning is correct before providing an answer. "
+                   "Utilize the 'Examples' section to assist you in performing the task. "
+                   "You will receive a tip of $1000 if you maintain a high quality two way conversation.",
+    roles=("<|im_start|>user", "<|im_start|>assistant"),
     messages=[],
     offset=0,
-    sep_style=SeparatorStyle.MPT,
+    sep_style=SeparatorStyle.CHATML,
     sep="<|im_end|>",
     sep2=None,
     tokenizer_id="",
