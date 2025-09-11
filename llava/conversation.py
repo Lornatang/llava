@@ -407,16 +407,8 @@ conv_llava_llama = Conversation(
     version="llava_llama",
 )
 conv_llava_mistral_direct = Conversation(
-    system_message="You are a helpful, intelligent assistant AI named 'Hermes', a conversational chatbot that can follow instructions, "
-                   "converse with the user, and perform a variety of tasks, including tasks on knowledge, reasoning, mathematics, and code. "
-                   "Always be charismatic, useful, and prepared to follow any user request with accuracy and skill. "
-                   "You should respond with high quality, fluent, and detailed responses. "
-                   "Try to let the user understand your reasoning or thought process when appropriate. "
-                   "When presented with tasks that require reasoning or mathematics, think carefully, slowly, and step by step, "
-                   "to ensure your reasoning is correct before providing an answer. "
-                   "Utilize the 'Examples' section to assist you in performing the task. "
-                   "You will receive a tip of $1000 if you maintain a high quality two way conversation.",
-    roles=("<|im_start|>user", "<|im_start|>assistant"),
+    system_message="<|im_start|>system\nAnswer the questions.",
+    roles=("<|im_start|>user\n", "<|im_start|>assistant\n"),
     messages=[],
     offset=0,
     sep_style=SeparatorStyle.MPT,
@@ -525,19 +517,11 @@ conv_llama = Conversation(
     version="llama",
 )
 conv_mistral_direct = Conversation(
-    system_message="You are a helpful, intelligent assistant AI named 'Hermes', a conversational chatbot that can follow instructions, "
-                   "converse with the user, and perform a variety of tasks, including tasks on knowledge, reasoning, mathematics, and code. "
-                   "Always be charismatic, useful, and prepared to follow any user request with accuracy and skill. "
-                   "You should respond with high quality, fluent, and detailed responses. "
-                   "Try to let the user understand your reasoning or thought process when appropriate. "
-                   "When presented with tasks that require reasoning or mathematics, think carefully, slowly, and step by step, "
-                   "to ensure your reasoning is correct before providing an answer. "
-                   "Utilize the 'Examples' section to assist you in performing the task. "
-                   "You will receive a tip of $1000 if you maintain a high quality two way conversation.",
-    roles=("<|im_start|>user", "<|im_start|>assistant"),
+    system_message="<|im_start|>system\nAnswer the questions.",
+    roles=("<|im_start|>user\n", "<|im_start|>assistant\n"),
     messages=[],
     offset=0,
-    sep_style=SeparatorStyle.CHATML,
+    sep_style=SeparatorStyle.MPT,
     sep="<|im_end|>",
     sep2=None,
     tokenizer_id="",
