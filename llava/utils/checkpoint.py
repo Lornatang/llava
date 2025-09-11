@@ -32,7 +32,7 @@ __all__ = [
 
 def load_pretrained(
         model_path: str,
-        model_base:Optional[str] = None,
+        model_base: Optional[str] = None,
         load_in_4bit: bool = False,
         load_in_8bit: bool = False,
         device_map: str = "auto",
@@ -82,14 +82,24 @@ def load_pretrained(
 
     if "lora" in model_path.lower() and model_base is not None:
         LOGGER.info("Loading LLaVA from base model...")
+        tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=True)
+
         if (
                 "qwen1.5" in model_path.lower() or
                 "qwen2" in model_path.lower() or
                 "qwen2.5" in model_path.lower()
         ):
             lora_cfg_pretrained = LlavaQwen2Config.from_pretrained(model_path)
-            tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=False)
             model = LlavaQwen2ForCausalLM.from_pretrained(
+                model_base,
+                low_cpu_mem_usage=True,
+                config=lora_cfg_pretrained,
+                attn_implementation=attn_implementation,
+                **kwargs,
+            )
+        elif "llama" in model_path.lower():
+            lora_cfg_pretrained = LlavaLlamaConfig.from_pretrained(model_path)
+            model = LlavaLlamaForCausalLM.from_pretrained(
                 model_base,
                 low_cpu_mem_usage=True,
                 config=lora_cfg_pretrained,
@@ -98,7 +108,6 @@ def load_pretrained(
             )
         else:
             lora_cfg_pretrained = LlavaLlamaConfig.from_pretrained(model_path)
-            tokenizer = AutoTokenizer.from_pretrained(model_base, use_fast=False)
             model = LlavaLlamaForCausalLM.from_pretrained(
                 model_base,
                 low_cpu_mem_usage=True,
@@ -126,12 +135,13 @@ def load_pretrained(
         model = model.merge_and_unload()
         LOGGER.info("Model is loaded...")
     else:
+        tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True)
+
         if (
                 "qwen1.5" in model_path.lower() or
                 "qwen2" in model_path.lower() or
                 "qwen2.5" in model_path.lower()
         ):
-            tokenizer = AutoTokenizer.from_pretrained(model_path)
             if "moe" in model_path.lower() or "A14B" in model_path.lower():
                 raise "LlavaQwen2MoeForCausalLM is not supported in this function."
                 # if overwrite_config is not None:
@@ -174,9 +184,25 @@ def load_pretrained(
                         attn_implementation=attn_implementation,
                         **kwargs,
                     )
-        else:
-            tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
+        elif "llama" in model_path.lower():
+            if customized_config is None:
+                llava_cfg = LlavaLlamaConfig.from_pretrained(model_path)
+            else:
+                llava_cfg = customized_config
 
+            if overwrite_config is not None:
+                LOGGER.info(f"Overwriting config with {overwrite_config}.")
+                for k, v in overwrite_config.items():
+                    setattr(llava_cfg, k, v)
+
+            model = LlavaLlamaForCausalLM.from_pretrained(
+                model_path,
+                low_cpu_mem_usage=True,
+                attn_implementation=attn_implementation,
+                config=llava_cfg,
+                **kwargs,
+            )
+        else:
             if customized_config is None:
                 llava_cfg = LlavaLlamaConfig.from_pretrained(model_path)
             else:

@@ -381,6 +381,8 @@ def http_bot(
             template_name = "qwen2"
         elif "qwen1.5" in model_selector.lower():
             template_name = "qwen1_5"
+        elif "llama" in model_selector.lower():
+            template_name = "llama"
         else:
             template_name = "vicuna_v1"
         new_state = conv_templates[template_name].copy()
