@@ -1099,8 +1099,9 @@ def preprocess_qwen(
         tokenizer.add_tokens(["<image>"], special_tokens=True)
 
     image_token_index = tokenizer.convert_tokens_to_ids("<image>")
-    im_start, im_end = tokenizer.additional_special_tokens_ids
-    unmask_tokens_index = [198, im_start, im_end]
+    image_start_index = tokenizer.convert_tokens_to_ids("<|im_start|>")
+    image_end_index = tokenizer.convert_tokens_to_ids("<|im_end|>")
+    unmask_tokens_index = [198, image_start_index, image_end_index]
 
     # Reset Qwen chat templates so that it won't include system message every time we apply.
     chat_template = "{% for message in messages %}{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}"
