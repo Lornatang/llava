@@ -60,10 +60,8 @@ class DispatchMethod(Enum):
     """Specifies the dispatch method for assigning tasks to workers.
 
     Attributes:
-        LOTTERY: A probabilistic method where workers with higher speed
-            are more likely to be chosen.
-        SHORTEST_QUEUE: A greedy method that assigns tasks to the worker
-            with the fewest tasks in its queue.
+        LOTTERY: A probabilistic method where workers with higher speed are more likely to be chosen.
+        SHORTEST_QUEUE: A greedy method that assigns tasks to the worker with the fewest tasks in its queue.
     """
     LOTTERY = enum.auto()
     SHORTEST_QUEUE = enum.auto()
@@ -73,15 +71,13 @@ class DispatchMethod(Enum):
         """Converts a string to its corresponding DispatchMethod enum.
 
         Args:
-            name: The string representation of the dispatch method (e.g., "lottery",
-                "shortest_queue").
+            name: The string representation of the dispatch method (e.g., "lottery", "shortest_queue").
 
         Returns:
             The DispatchMethod enum instance.
 
         Raises:
-            ValueError: If the provided `name` does not correspond to
-                a valid dispatch method.
+            ValueError: If the provided `name` does not correspond to a valid dispatch method.
         """
         if name == "lottery":
             return cls.LOTTERY
@@ -99,10 +95,8 @@ class WorkerInfo:
         model_names: A list of model names that the worker can serve.
         speed: The processing speed of the worker, used for dispatching.
         queue_length: The number of pending tasks in the worker's queue.
-        check_heart_beat: A boolean indicating whether to check the worker's
-            heartbeat.
-        last_heart_beat: A string representing the timestamp of the last
-            received heartbeat from the worker.
+        check_heart_beat: A boolean indicating whether to check the worker's heartbeat.
+        last_heart_beat: A string representing the timestamp of the last received heartbeat from the worker.
     """
     model_names: List[str]
     speed: int
@@ -117,7 +111,7 @@ class Controller:
     This class handles the registration of workers, monitors their status via heartbeats, and determines the best worker for a given task based on the chosen dispatch method.
     """
 
-    def __init__(self, dispatch_method: str):
+    def __init__(self, dispatch_method: str) -> None:
         """Initializes the controller with a dispatch method.
 
         Args:
