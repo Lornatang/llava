@@ -16,7 +16,7 @@ cd llava
 **2. Install Package**
 
 ```shell
-conda create -n llava python=3.12.10 -y
+conda create -n llava python=3.12.11 -y
 conda activate llava
 pip3 install --upgrade pip
 pip3 install torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cu129
