@@ -48,8 +48,6 @@ dependencies = [
     "shortuuid",
     "timm",
     "tiktoken",
-    "torch>=2.7.1",
-    "torchvision>=0.22.1",
     "tokenizers",
     "transformers",
     "uvicorn",
