@@ -216,21 +216,33 @@ def get_anyres_image_grid_shape(
     return width // patch_size, height // patch_size
 
 
-def get_model_name_from_path(model_path: str) -> str:
-    """Extracts the model name from a model path.
+def get_model_name_from_path(model_path: Path | str) -> str:
+    """Extracts a formatted model name from a given model path.
+
+    This function processes a model directory path and returns a simplified
+    and consistent model name. If the path ends with a checkpoint folder
+    (e.g., "checkpoint-1234"), the function concatenates the parent folder
+    name and the checkpoint identifier using an underscore ("_"). Otherwise,
+    it returns the last folder name as the model name.
+
+    Example:
+        >>> get_model_name_from_path("./results/stage0/checkpoint-1000/")
+        "llava_checkpoint-1000"
+        >>> get_model_name_from_path("models/qwen2-7b")
+        "qwen2-7b"
 
     Args:
-        model_path (str): The path to the model.
+        model_path (Path | str): The full file system path to the model directory.
 
     Returns:
-        str: The extracted model name.
+        str: A normalized model name extracted from the path.
     """
-    model_path = model_path.strip("/")
-    model_paths = model_path.split("/")
-    if model_paths[-1].startswith("checkpoint-"):
-        return model_paths[-2] + "_" + model_paths[-1]
-    else:
-        return model_paths[-1]
+    path = Path(model_path).resolve()
+
+    if path.name.startswith("checkpoint-") and path.parent.name:
+        return f"{path.parent.name}_{path.name}"
+
+    return path.name
 
 
 def get_peft_state_maybe_zero_3(named_params: Iterable, bias: str) -> Dict[str, torch.Tensor]:
