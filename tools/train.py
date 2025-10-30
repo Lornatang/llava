@@ -719,7 +719,7 @@ def get_model(
             #     model_args.model_path,
             #     cache_dir=training_args.cache_dir,
             #     attn_implementation=training_args.attn_implementation,
-            #     torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+            #     dtype=(torch.bfloat16 if training_args.bf16 else None),
             #     low_cpu_mem_usage=False,
             #     **customized_kwargs,
             # )
@@ -729,7 +729,7 @@ def get_model(
                 model_args.model_path,
                 cache_dir=training_args.cache_dir,
                 attn_implementation=training_args.attn_implementation,
-                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                dtype=(torch.bfloat16 if training_args.bf16 else None),
                 low_cpu_mem_usage=False,
                 **customized_kwargs,
             )
@@ -741,7 +741,7 @@ def get_model(
             model_args.model_path,
             cache_dir=training_args.cache_dir,
             attn_implementation=training_args.attn_implementation,
-            torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+            dtype=(torch.bfloat16 if training_args.bf16 else None),
             low_cpu_mem_usage=False,
             **customized_kwargs,
         )
@@ -1211,7 +1211,7 @@ def train(attn_implementation: str = None) -> None:
 
     # If use 4/8bit training.
     if training_args.bits in [4, 8]:
-        model.config.torch_dtype = torch.float32 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32)
+        model.config.dtype = torch.float32 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32)
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=training_args.gradient_checkpointing)
 
     if training_args.gradient_checkpointing:
