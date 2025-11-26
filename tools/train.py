@@ -31,7 +31,7 @@ import yaml
 from PIL import Image, ImageFile
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from peft.tuners.lora import LoraLayer
-from transformers import AutoConfig
+from transformers import AutoConfig, AutoProcessor
 
 from llava import conversation as conversation_lib
 from llava.constants import IMAGE_TOKEN_INDEX, IGNORE_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
@@ -1241,6 +1241,8 @@ def train(attn_implementation: str = None) -> None:
         LOGGER.info("Adding LoRA adapters...")
         model = get_peft_model(model, lora_config)
 
+    processor = AutoProcessor.from_pretrained(model_args.model_path)
+    
     # Load tokenizer.
     if (
             "qwen1.5" in model_args.model_path.lower() or
@@ -1425,6 +1427,7 @@ def train(attn_implementation: str = None) -> None:
     else:
         safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
 
+    processor.save_pretrained(training_args.output_dir)
     LOGGER.info(f"Model saved to {training_args.output_dir}.")
 
 
