@@ -37,7 +37,6 @@ torchrun --nproc_per_node=${NPROC_PER_NODE} \
          --data_path ${DATA_PATH} \
          --image_folder ${IMAGE_FOLDER} \
          --vision_tower ${VISION_MODEL_PATH} \
-         --pretrain_mm_mlp_adapter ${PRETRAIN_MM_MLP_ADAPTER_PATH} \
          --mm_tunable_parts "mm_vision_tower,mm_mlp_adapter,mm_language_model" \
          --mm_vision_tower_lr 2e-6 \
          --mm_vision_select_layer -2 \
